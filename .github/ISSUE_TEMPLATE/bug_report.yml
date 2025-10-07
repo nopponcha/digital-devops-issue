@@ -2,7 +2,6 @@ name: 🐛 DevOps Issue
 description: รายงานปัญหาที่พบในการทำงานของระบบ
 title: "[Issue] <ระบุชื่อ Issue ที่เข้าใจได้>"
 labels: ["aws-issue", "azure-issue", "system-issue", "jenkins-issue", "kubernetes-issue"]
-projects: ["scbconnect", "j4u", "merchant", "rpt"]
 body:
   # 1. Dropdown สำหรับการจัดประเภทปัญหา (Category)
   - type: dropdown
