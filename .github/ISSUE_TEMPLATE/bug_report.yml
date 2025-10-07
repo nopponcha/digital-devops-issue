@@ -41,3 +41,12 @@ body:
         3. ปัญหา Z เกิดขึ้น
     validations:
       required: true
+
+  # 4. Input Text สำหรับ Project Name
+  - type: input
+    id: affected_project
+    attributes:
+      label: Project/Application ที่ได้รับผลกระทบ (เช่น scbconnect, j4u)
+      description: กรุณาระบุชื่อ Project ที่เกิดปัญหา
+    validations:
+      required: true      
