@@ -1,19 +1,34 @@
 name: 🐛 DevOps Issue
 description: รายงานปัญหาที่พบในการทำงานของระบบ
 title: "[Issue] <ระบุชื่อ Issue ที่เข้าใจได้>"
-labels: ["aws-issue", "azure-issue", "system-issue", "jenkins-issue", "kubernetes-issue"]
+labels: 
+  - "jenkins-failure"
+  - "git-issue"
+  - "docker-issue"
+  - "kubernetes-issue"
+  - "network-issue"
+  - "cloud-issue"
+  - "security-issue"
+  - "resource-issue"
+  - "general-system" # สำหรับปัญหาที่ระบุประเภทไม่ได้
+
 body:
   # 1. Dropdown สำหรับการจัดประเภทปัญหา (Category)
   - type: dropdown
     id: category
     attributes:
       label: ประเภทของปัญหา (Issue Category)
-      description: กรุณาเลือกประเภทของปัญหาที่เกิดขึ้น
+      description: กรุณาเลือกประเภทของปัญหาที่เกิดขึ้น ซึ่งจะช่วยให้ AI และ Engineer ระบุสาเหตุได้เร็วขึ้น
       options:
-        - Jenkins-failure
-        - Disk
-        - Resource
-        - Cloud
+        - Jenkins-failure # ปัญหา CI/CD Pipeline
+        - Docker-Build-Fail # ปัญหาเกี่ยวกับการสร้าง/รัน Docker
+        - Kubernetes-Runtime # ปัญหา Pod, Service, Deployment ใน K8s
+        - Git-VCS-Error # ปัญหาการทำ Pull, Push, Clone หรือ Credential ของ Git
+        - Network-Connectivity # ปัญหาการเชื่อมต่อ, Firewall, Load Balancer
+        - Cloud-Infrastructure # ปัญหา AWS/Azure/GCP Infrastructure (เช่น IAM, Storage)
+        - Resource-Allocation # ปัญหา Memory/CPU/Disk เต็ม หรือ Limit
+        - Security-Alert # ปัญหา Vulnerability Scan, Credential Leak
+        - General-System-Failure # ปัญหาที่ไม่สามารถระบุประเภทได้
     validations:
       required: true
       
@@ -29,16 +44,16 @@ body:
         - label: ฉันได้ลองทำซ้ำขั้นตอนแล้ว และปัญหายังคงอยู่
           required: true
 
-  # 3. Text Area สำหรับ Steps to Reproduce
+  # 3. Text Area สำหรับ Steps to Reproduce / Log
   - type: textarea
     id: steps_to_reproduce
     attributes:
-      label: ขั้นตอนการเกิดปัญหา (Steps to Reproduce)
-      description: โปรดระบุขั้นตอนโดยละเอียดที่ทำให้เกิดปัญหา
+      label: ขั้นตอนการเกิดปัญหา หรือ Log ที่เกี่ยวข้อง (Steps to Reproduce / Relevant Log)
+      description: โปรดระบุขั้นตอนโดยละเอียดที่ทำให้เกิดปัญหา หรือแนบส่วนของ Log ที่แสดง Error
       placeholder: |
-        1. ไปที่หน้า X
-        2. คลิกปุ่ม Y
-        3. ปัญหา Z เกิดขึ้น
+        1. ไปที่ Jenkins Job/Console Output ที่ URL: ...
+        2. ปัญหาเกิดขึ้นที่ Stage "Build Docker Image"
+        3. Error: "No space left on device" (ถ้ามี Log ให้แนบใน Code Block)
     validations:
       required: true
 
@@ -46,7 +61,7 @@ body:
   - type: input
     id: affected_project
     attributes:
-      label: Project/Application ที่ได้รับผลกระทบ (เช่น scbconnect, j4u)
+      label: Project/Application ที่ได้รับผลกระทบ (เช่น scbconnect, j4u, system-wide)
       description: กรุณาระบุชื่อ Project ที่เกิดปัญหา
     validations:
-      required: true      
+      required: true
