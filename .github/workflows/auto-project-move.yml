@@ -1,42 +1,39 @@
 name: Auto Move Project Card
-# Action นี้จะทำงานเมื่อมี Event เกี่ยวกับ Issue เกิดขึ้นเท่านั้น (เปิด, ติด Label, Assign)
 on:
   issues:
-    types: [labeled, assigned]
+    types: [labeled, assigned, opened] # เพิ่ม opened เพื่อดัก Issue ที่สร้างใหม่ทันที
 
 jobs:
   # -----------------------------------------------
   # 1. TODO: เมื่อ n8n Flow 1 ติด Label 'Todo'
   # -----------------------------------------------
   move_to_todo:
-    # เงื่อนไข: ให้รัน Job นี้เฉพาะเมื่อ Label ที่ถูกเพิ่มคือ 'Todo' เท่านั้น
+    # เงื่อนไข: ให้รัน Job นี้เฉพาะเมื่อ Label 'Todo' ถูกเพิ่ม
     if: github.event.action == 'labeled' && github.event.label.name == 'Todo'
     runs-on: ubuntu-latest
     
     steps:
-      - name: Move Issue to 'Todo' column
-        # ใช้ Action สำเร็จรูปในการจัดการ Project Board
-        uses: alex-page/github-project-card-automation@v1 
+      - name: Add to Project Board
+        # ใช้ Action ที่จัดการ Project V2 โดยเฉพาะ
+        uses: actions/add-to-project@v0.5.0 
         with:
-          # (!!! สำคัญ: ต้องใส่ชื่อ Project ของคุณแทนที่ข้อความนี้)
-          project: 'DevOps-Issue' 
-          column: 'Todo'
-          # GITHUB_TOKEN มีอยู่แล้ว ไม่ต้องสร้าง Secret ใหม่
-          token: ${{ secrets.GITHUB_TOKEN }}
+          # (!!! สำคัญ: ต้องใส่ Project ID แทนที่ชื่อ)
+          # คุณต้องไปหา ID ของ Project Board 'DevOps-Issue' มาแทนที่
+          project-url: 'https://github.com/users/YOUR_USER_NAME/projects/YOUR_PROJECT_NUMBER' 
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          # Note: Action นี้จะ 'เพิ่ม' Item เข้า Project Board โดยอัตโนมัติ
+          # การย้าย Column จะต้องใช้ Workflows ใน UI หรือ Action ที่ซับซ้อนกว่านี้
 
   # -----------------------------------------------
   # 2. IN PROGRESS: เมื่อ n8n Flow 2 Assign Engineer
   # -----------------------------------------------
   move_to_in_progress:
-    # เงื่อนไข: ให้รัน Job นี้เฉพาะเมื่อ Issue ถูก 'assigned' เท่านั้น
+    # เงื่อนไข: ให้รัน Job นี้เฉพาะเมื่อ Issue ถูก 'assigned'
     if: github.event.action == 'assigned'
     runs-on: ubuntu-latest
     
     steps:
-      - name: Move Issue to 'In Progress' column
-        uses: alex-page/github-project-card-automation@v1
-        with:
-          # (!!! สำคัญ: ต้องใส่ชื่อ Project ของคุณแทนที่ข้อความนี้)
-          project: 'DevOps-Issue' 
-          column: 'In Progress'
-          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Update Project Status to 'In Progress'
+        # Action สำหรับย้าย Status โดยตรงนั้นซับซ้อนกว่า
+        # เนื่องจาก Projects V2 เน้นการใช้ UI Workflows
+        run: echo "Need custom API call or Project UI Workflow for status change."
