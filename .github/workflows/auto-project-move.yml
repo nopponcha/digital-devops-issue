@@ -19,7 +19,7 @@ jobs:
         with:
           # (!!! สำคัญ: ต้องใส่ Project ID แทนที่ชื่อ)
           # คุณต้องไปหา ID ของ Project Board 'DevOps-Issue' มาแทนที่
-          project-url: 'https://github.com/orgs/nopponcha/projects/2'
+          project-url: 'https://github.com/users/nopponcha/projects/2'
           github-token: ${{ secrets.GITHUB_TOKEN }}
           # Note: Action นี้จะ 'เพิ่ม' Item เข้า Project Board โดยอัตโนมัติ
           # การย้าย Column จะต้องใช้ Workflows ใน UI หรือ Action ที่ซับซ้อนกว่านี้
