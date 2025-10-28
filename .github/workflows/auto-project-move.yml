@@ -5,18 +5,19 @@ on:
 
 permissions:
   contents: read
-  issues: write
-  pull-requests: write
+  issues: write # สิทธิ์สำหรับการจัดการ Issue
+  pull-requests: write # อาจจะจำเป็นในการดึง Project ID 
 
 env:
-  # *** เปลี่ยนไปใช้ Project ID ใหม่ที่ได้จาก cURL ***
+  # Project ID ที่ถูกต้องสำหรับ Project V2 'DevOps-Issue'
   PROJECT_ID: PVT_kwHOAhgQ884BGnV2 
   
 jobs:
   # -----------------------------------------------
-  # 1. TODO: เมื่อ n8n ติด Label 'Todo'
+  # 1. TODO: เมื่อ Issue ถูกติด Label 'Todo'
   # -----------------------------------------------
   move_to_todo:
+    # Trigger เมื่อติด Label ที่ชื่อ 'Todo'
     if: github.event.action == 'labeled' && github.event.label.name == 'Todo'
     runs-on: ubuntu-latest
     
@@ -24,9 +25,10 @@ jobs:
       - name: Set Status to Todo via GraphQL
         uses: actions/github-script@v6
         with:
-          # ใช้ PROJECT_PAT ที่คุณสร้างและมีสิทธิ์ 'project'
+          # ใช้ Personal Access Token (PAT) ที่มีสิทธิ์ 'project' และ 'repo'
           github-token: ${{ secrets.PROJECT_PAT }} 
           script: |
+            const core = require('@actions/core');
             const PROJECT_ID = process.env.PROJECT_ID;
             const CONTENT_ID = context.payload.issue.node_id;
 
@@ -45,12 +47,22 @@ jobs:
               }`, { id: PROJECT_ID });
             
             const statusField = projectRes.node.fields.nodes.find(f => f.name === 'Status');
-            if (!statusField) throw new Error("Status field not found in project.");
+            
+            // **การตรวจสอบข้อผิดพลาด 1: Field Name**
+            if (!statusField) {
+              core.setFailed("Error: 'Status' field not found. Check Field Name and case sensitivity in Project Settings.");
+              return; 
+            }
             
             const statusFieldId = statusField.id;
-            const todoOptionId = statusField.options.find(o => o.name === 'Todo').id;
+            const todoOption = statusField.options.find(o => o.name === 'Todo');
             
-            if (!todoOptionId) throw new Error("Todo option ID not found.");
+            // **การตรวจสอบข้อผิดพลาด 2: Option Name**
+            if (!todoOption) {
+              core.setFailed("Error: 'Todo' option not found in Status field. Check Option Name and case sensitivity in Project Settings.");
+              return;
+            }
+            const todoOptionId = todoOption.id;
 
             // 2. ทำการ Mutation เพื่อ Update Status
             await github.graphql(`
@@ -76,6 +88,7 @@ jobs:
   # 2. IN PROGRESS: เมื่อ Assign Engineer
   # -----------------------------------------------
   move_to_in_progress:
+    # Trigger เมื่อมีการ Assign
     if: github.event.action == 'assigned'
     runs-on: ubuntu-latest
     
@@ -85,6 +98,7 @@ jobs:
         with:
           github-token: ${{ secrets.PROJECT_PAT }} 
           script: |
+            const core = require('@actions/core');
             const PROJECT_ID = process.env.PROJECT_ID;
             const CONTENT_ID = context.payload.issue.node_id;
             
@@ -103,12 +117,22 @@ jobs:
               }`, { id: PROJECT_ID });
             
             const statusField = projectRes.node.fields.nodes.find(f => f.name === 'Status');
-            if (!statusField) throw new Error("Status field not found in project.");
+            
+            // **การตรวจสอบข้อผิดพลาด 1: Field Name**
+            if (!statusField) {
+              core.setFailed("Error: 'Status' field not found. Check Field Name and case sensitivity in Project Settings.");
+              return; 
+            }
             
             const statusFieldId = statusField.id;
-            const inProgressOptionId = statusField.options.find(o => o.name === 'In Progress').id;
+            const inProgressOption = statusField.options.find(o => o.name === 'In Progress');
             
-            if (!inProgressOptionId) throw new Error("In Progress option ID not found.");
+            // **การตรวจสอบข้อผิดพลาด 2: Option Name**
+            if (!inProgressOption) {
+              core.setFailed("Error: 'In Progress' option not found in Status field. Check Option Name and case sensitivity in Project Settings.");
+              return;
+            }
+            const inProgressOptionId = inProgressOption.id;
 
             // 2. ทำการ Mutation เพื่อ Update Status
             await github.graphql(`
