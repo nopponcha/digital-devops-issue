@@ -1,7 +1,7 @@
 name: Auto Move Project Card
 on:
   issues:
-    types: [labeled, assigned, opened] # เพิ่ม opened เพื่อดัก Issue ที่สร้างใหม่ทันที
+    types: [labeled, assigned, opened]
 
 jobs:
   # -----------------------------------------------
@@ -14,16 +14,14 @@ jobs:
     
     steps:
       - name: Add to Project Board
-        # ใช้ Action ที่จัดการ Project V2 โดยเฉพาะ
+        # ใช้ Action ที่เป็นทางการของ GitHub
         uses: actions/add-to-project@v0.5.0 
         with:
-          # (!!! สำคัญ: ต้องใส่ Project ID แทนที่ชื่อ)
-          # คุณต้องไปหา ID ของ Project Board 'DevOps-Issue' มาแทนที่
-          project-url: 'https://github.com/users/nopponcha/projectV2/PVT_kwHOAhgQ884BGiVe' 
+          # *** แก้ไข: ใช้ Project URL ในรูปแบบที่ Action ต้องการ ***
+          # รูปแบบ: https://github.com/users/ownerName/projects/projectNumber
+          project-url: 'https://github.com/users/nopponcha/projects/2' 
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          # Note: Action นี้จะ 'เพิ่ม' Item เข้า Project Board โดยอัตโนมัติ
-          # การย้าย Column จะต้องใช้ Workflows ใน UI หรือ Action ที่ซับซ้อนกว่านี้
-
+          
   # -----------------------------------------------
   # 2. IN PROGRESS: เมื่อ n8n Flow 2 Assign Engineer
   # -----------------------------------------------
@@ -34,6 +32,7 @@ jobs:
     
     steps:
       - name: Update Project Status to 'In Progress'
-        # Action สำหรับย้าย Status โดยตรงนั้นซับซ้อนกว่า
-        # เนื่องจาก Projects V2 เน้นการใช้ UI Workflows
-        run: echo "Need custom API call or Project UI Workflow for status change."
+        # Action สำหรับย้าย Status โดยตรงนั้นซับซ้อนกว่า (ต้องใช้ API)
+        # Action 'actions/add-to-project' ทำได้แค่เพิ่ม Item เข้า Board
+        # การเปลี่ยน Status จะต้องตั้งค่าใน Workflows UI
+        run: echo "Item added to project. Please set 'In Progress' move rule in GitHub Projects UI."
