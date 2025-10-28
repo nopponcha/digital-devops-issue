@@ -9,7 +9,7 @@ permissions:
   pull-requests: write
 
 env:
-  # Project ID ที่ถูกต้องสำหรับ Project V2 'DevOps-Issue'
+  # Project ID ใหม่ที่ถูกต้อง
   PROJECT_ID: PVT_kwHOAhgQ884BGnf5
   
 jobs:
@@ -26,11 +26,35 @@ jobs:
         with:
           github-token: ${{ secrets.PROJECT_PAT }} 
           script: |
-            // **บรรทัดนี้ถูกลบออกแล้ว** const core = require('@actions/core');
             const PROJECT_ID = process.env.PROJECT_ID;
             const CONTENT_ID = context.payload.issue.node_id;
 
-            // 1. ค้นหา Field ID และ Option ID ของ Status:Todo
+            // ----------------------------------------------------
+            // **ขั้นตอนที่ 1: เพิ่ม Issue เข้า Project V2 ก่อน**
+            // แก้ปัญหา 'Could not resolve to ProjectV2Item node'
+            // ----------------------------------------------------
+            core.info(`Adding item ${CONTENT_ID} to project ${PROJECT_ID}...`);
+            await github.graphql(`
+              mutation addProjectItem($projectId: ID!, $contentId: ID!) {
+                addProjectV2ItemById(input: {
+                  projectId: $projectId,
+                  contentId: $contentId
+                }) {
+                  item { id }
+                }
+              }
+            `, {
+              projectId: PROJECT_ID,
+              contentId: CONTENT_ID,
+            });
+            core.info(`Item added successfully.`);
+
+
+            // ----------------------------------------------------
+            // **ขั้นตอนที่ 2: อัปเดตสถานะเป็น Todo**
+            // ----------------------------------------------------
+            
+            // 2.1 ค้นหา Field ID และ Option ID ของ Status:Todo
             const projectRes = await github.graphql(`
               query getProjectFields($id: ID!) {
                 node(id: $id) {
@@ -53,7 +77,7 @@ jobs:
             }
             
             const statusFieldId = statusField.id;
-            const todoOption = statusField.options.find(o => o.name === 'Todo');
+            const todoOption = statusField.options.find(o => o.name === 'Todo'); // ใช้ 'Todo' ตามโค้ดล่าสุด
             
             // การตรวจสอบข้อผิดพลาด 2: Option Name
             if (!todoOption) {
@@ -62,7 +86,8 @@ jobs:
             }
             const todoOptionId = todoOption.id;
 
-            // 2. ทำการ Mutation เพื่อ Update Status
+            // 2.2 ทำการ Mutation เพื่อ Update Status
+            // NOTE: เราใช้ CONTENT_ID เป็น itemId ใน ProjectV2ItemFieldValue mutation ได้
             await github.graphql(`
               mutation updateProjectStatus($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
                 updateProjectV2ItemFieldValue(input: {
@@ -80,7 +105,7 @@ jobs:
               optionId: todoOptionId,
             });
             
-            core.info(`Successfully moved item ${CONTENT_ID} to Status: Todo`);
+            core.info(`Successfully set item status to: Todo`);
 
   # -----------------------------------------------
   # 2. IN PROGRESS: เมื่อ Assign Engineer
@@ -95,11 +120,33 @@ jobs:
         with:
           github-token: ${{ secrets.PROJECT_PAT }} 
           script: |
-            // **บรรทัดนี้ถูกลบออกแล้ว** const core = require('@actions/core');
             const PROJECT_ID = process.env.PROJECT_ID;
             const CONTENT_ID = context.payload.issue.node_id;
+
+            // ----------------------------------------------------
+            // **ขั้นตอนที่ 1: เพิ่ม Issue เข้า Project V2 ก่อน**
+            // ----------------------------------------------------
+            core.info(`Adding item ${CONTENT_ID} to project ${PROJECT_ID}...`);
+            await github.graphql(`
+              mutation addProjectItem($projectId: ID!, $contentId: ID!) {
+                addProjectV2ItemById(input: {
+                  projectId: $projectId,
+                  contentId: $contentId
+                }) {
+                  item { id }
+                }
+              }
+            `, {
+              projectId: PROJECT_ID,
+              contentId: CONTENT_ID,
+            });
+            core.info(`Item added successfully.`);
             
-            // 1. ค้นหา Field ID และ Option ID ของ Status:In Progress
+            // ----------------------------------------------------
+            // **ขั้นตอนที่ 2: อัปเดตสถานะเป็น In Progress**
+            // ----------------------------------------------------
+            
+            // 2.1 ค้นหา Field ID และ Option ID ของ Status:In Progress
             const projectRes = await github.graphql(`
               query getProjectFields($id: ID!) {
                 node(id: $id) {
@@ -131,7 +178,7 @@ jobs:
             }
             const inProgressOptionId = inProgressOption.id;
 
-            // 2. ทำการ Mutation เพื่อ Update Status
+            // 2.2 ทำการ Mutation เพื่อ Update Status
             await github.graphql(`
               mutation updateProjectStatus($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
                 updateProjectV2ItemFieldValue(input: {
@@ -149,4 +196,4 @@ jobs:
               optionId: inProgressOptionId,
             });
             
-            core.info(`Successfully moved item ${CONTENT_ID} to Status: In Progress`);
+            core.info(`Successfully set item status to: In Progress`);
