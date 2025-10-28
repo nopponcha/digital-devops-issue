@@ -9,7 +9,7 @@ permissions:
   pull-requests: write
 
 env:
-  # Project ID ใหม่ที่ถูกต้อง
+  # Project ID ที่ถูกต้อง
   PROJECT_ID: PVT_kwHOAhgQ884BGnf5
   
 jobs:
@@ -102,11 +102,11 @@ jobs:
             core.info(`Successfully set item status to: Todo`);
 
   # -----------------------------------------------
-  # 2. IN PROGRESS: เมื่อ Assign ผู้ใช้ 'n8n'
+  # 2. IN PROGRESS: เมื่อมีการ Assign ใครก็ได้
   # -----------------------------------------------
   move_to_in_progress:
-    # เงื่อนไขใหม่: ต้องเป็น action 'assigned' และผู้ถูกมอบหมายต้องเป็น 'n8n'
-    if: github.event.action == 'assigned' && github.event.assignee.login == 'n8n'
+    # เงื่อนไขที่แก้ไข: ทำงานเมื่อ action เป็น 'assigned' เท่านั้น
+    if: github.event.action == 'assigned'
     runs-on: ubuntu-latest
     
     steps:
