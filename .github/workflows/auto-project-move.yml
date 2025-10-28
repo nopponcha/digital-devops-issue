@@ -28,11 +28,9 @@ jobs:
           script: |
             const PROJECT_ID = process.env.PROJECT_ID;
             const CONTENT_ID = context.payload.issue.node_id;
-            let PROJECT_ITEM_ID;
+            let PROJECT_ITEM_ID; 
 
-            // ----------------------------------------------------
             // ขั้นตอนที่ 1: เพิ่ม Issue เข้า Project V2 และดึง Item ID
-            // ----------------------------------------------------
             core.info(`Adding item ${CONTENT_ID} to project ${PROJECT_ID}...`);
             const addItemRes = await github.graphql(`
               mutation addProjectItem($projectId: ID!, $contentId: ID!) {
@@ -40,7 +38,7 @@ jobs:
                   projectId: $projectId,
                   contentId: $contentId
                 }) {
-                  item { id } 
+                  item { id }
                 }
               }
             `, {
@@ -51,9 +49,7 @@ jobs:
             core.info(`Item added successfully. Project Item ID: ${PROJECT_ITEM_ID}`);
 
 
-            // ----------------------------------------------------
-            // ขั้นตอนที่ 2: อัปเดตสถานะเป็น Todo (ใช้ Item ID ใหม่)
-            // ----------------------------------------------------
+            // ขั้นตอนที่ 2: อัปเดตสถานะเป็น Todo
             
             // 2.1 ค้นหา Field ID และ Option ID ของ Status:Todo
             const projectRes = await github.graphql(`
@@ -106,10 +102,11 @@ jobs:
             core.info(`Successfully set item status to: Todo`);
 
   # -----------------------------------------------
-  # 2. IN PROGRESS: เมื่อ Assign Engineer
+  # 2. IN PROGRESS: เมื่อ Assign ผู้ใช้ 'n8n'
   # -----------------------------------------------
   move_to_in_progress:
-    if: github.event.action == 'assigned'
+    # เงื่อนไขใหม่: ต้องเป็น action 'assigned' และผู้ถูกมอบหมายต้องเป็น 'n8n'
+    if: github.event.action == 'assigned' && github.event.assignee.login == 'n8n'
     runs-on: ubuntu-latest
     
     steps:
@@ -124,9 +121,7 @@ jobs:
             
             const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-            // ----------------------------------------------------
             // ขั้นตอนที่ 1: เพิ่ม Issue เข้า Project V2 และดึง Item ID
-            // ----------------------------------------------------
             core.info(`Adding item ${CONTENT_ID} to project ${PROJECT_ID}...`);
             const addItemRes = await github.graphql(`
               mutation addProjectItem($projectId: ID!, $contentId: ID!) {
@@ -146,9 +141,7 @@ jobs:
 
             await sleep(1000); 
 
-            // ----------------------------------------------------
-            // ขั้นตอนที่ 2: อัปเดตสถานะเป็น In Progress (ใช้ Item ID ใหม่)
-            // ----------------------------------------------------
+            // ขั้นตอนที่ 2: อัปเดตสถานะเป็น In Progress
             
             // 2.1 ค้นหา Field ID และ Option ID ของ Status:In Progress
             const projectResFields = await github.graphql(`
