@@ -3,6 +3,9 @@ on:
   issues:
     types: [labeled, assigned]
 
+permissions:
+  contents: read
+
 jobs:
   # -----------------------------------------------
   # 1. TODO: เมื่อ n8n Flow 1 ติด Label 'Todo'
@@ -13,19 +16,17 @@ jobs:
     
     steps:
       - name: Set Status to Todo
-        # *** ใช้ Action สำเร็จรูปที่ออกแบบมาเพื่อ Project V2 field update โดยเฉพาะ ***
-        # Note: Actions ตัวนี้ไม่ใช่ของทางการ แต่ถูกออกแบบมาเพื่อแก้ปัญหานี้โดยตรง
-        uses: edgard/set-project-v2-field-action@v1 
+        # *** เปลี่ยนไปใช้ Action ที่เสถียรและได้รับความนิยม (จาก Marketplace) ***
+        uses: srggrs/set-project-v2-status-action@v1 
         with:
-          # ใส่ Project ID ที่คุณหามาได้
+          # Project ID ที่คุณหามาได้
           project-id: PVT_kwHOAhgQ884BGiVe 
           # ID ของ Item ที่จะอัพเดต (ได้มาจาก Payload ของ Issue Event)
           issue-id: ${{ github.event.issue.node_id }} 
-          # ชื่อ Field ที่ต้องการอัพเดต (คือ Status)
-          field-name: Status 
-          # ค่าใหม่ที่ต้องการ (คือ Todo)
-          value: Todo
-          github-token: ${{ secrets.ISSSUE_GITHUB_TOKEN }}
+          # ค่าใหม่ที่ต้องการ (ต้องตรงกับชื่อ Status Column ใน Board)
+          status-value: Todo 
+          # *** ใช้ Secret ที่มีสิทธิ์เข้าถึง User Project (PROJECT_PAT) ***
+          github-token: ${{ secrets.PROJECT_PAT }} 
 
   # -----------------------------------------------
   # 2. IN PROGRESS: เมื่อ n8n Flow 2 Assign Engineer
@@ -36,10 +37,9 @@ jobs:
     
     steps:
       - name: Set Status to In Progress
-        uses: edgard/set-project-v2-field-action@v1 
+        uses: srggrs/set-project-v2-status-action@v1
         with:
           project-id: PVT_kwHOAhgQ884BGiVe 
           issue-id: ${{ github.event.issue.node_id }} 
-          field-name: Status 
-          value: In Progress
-          github-token: ${{ secrets.ISSSUE_GITHUB_TOKEN }}
+          status-value: 'In Progress' # ต้องตรงกับชื่อ Status Column ใน Board
+          github-token: ${{ secrets.PROJECT_PAT }}
