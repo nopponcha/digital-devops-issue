@@ -25,7 +25,7 @@ jobs:
           field-name: Status 
           # ค่าใหม่ที่ต้องการ (คือ Todo)
           value: Todo
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.ISSSUE_GITHUB_TOKEN }}
 
   # -----------------------------------------------
   # 2. IN PROGRESS: เมื่อ n8n Flow 2 Assign Engineer
@@ -42,4 +42,4 @@ jobs:
           issue-id: ${{ github.event.issue.node_id }} 
           field-name: Status 
           value: In Progress
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.ISSSUE_GITHUB_TOKEN }}
