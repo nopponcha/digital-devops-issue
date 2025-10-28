@@ -17,7 +17,7 @@ jobs:
     steps:
       - name: Set Status to Todo
         # *** เปลี่ยนไปใช้ Action ที่เสถียรและได้รับความนิยม (จาก Marketplace) ***
-        uses: srggrs/set-project-v2-status-action@v1 
+        uses: actions/github-script@v6 
         with:
           # Project ID ที่คุณหามาได้
           project-id: PVT_kwHOAhgQ884BGiVe 
@@ -37,7 +37,7 @@ jobs:
     
     steps:
       - name: Set Status to In Progress
-        uses: srggrs/set-project-v2-status-action@v1
+        uses: actions/github-script@v6
         with:
           project-id: PVT_kwHOAhgQ884BGiVe 
           issue-id: ${{ github.event.issue.node_id }} 
