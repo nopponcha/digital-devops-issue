@@ -2,37 +2,197 @@ name: Auto Move Project Card
 on:
   issues:
     types: [labeled, assigned, opened]
+  pull_request:
+    types: [labeled, opened]
+
+permissions:
+  issues: write
+  pull-requests: write
+  contents: read
+  projects: write
+
+env:
+  # ตั้ง secret ใน repository:
+  # PROJECT_V2_ID = ตัวอย่าง: PVT_kwHOAhgQ884BGiVe
+  # (ถ้า GITHUB_TOKEN ไม่มีสิทธิ์เข้าถึง user-level project ให้ตั้ง PROJECT_PAT เป็น PAT ที่มี project/repo scopes)
+  PROJECT_V2_ID: ${{ secrets.PROJECT_V2_ID }}
+  PROJECT_PAT: ${{ secrets.PROJECT_PAT }}
 
 jobs:
-  # -----------------------------------------------
-  # 1. TODO: เมื่อ n8n Flow 1 ติด Label 'Todo'
-  # -----------------------------------------------
   move_to_todo:
     # เงื่อนไข: ให้รัน Job นี้เฉพาะเมื่อ Label 'Todo' ถูกเพิ่ม
     if: github.event.action == 'labeled' && github.event.label.name == 'Todo'
     runs-on: ubuntu-latest
-    
     steps:
-      - name: Add to Project Board
-        # ใช้ Action ที่เป็นทางการของ GitHub
-        uses: actions/add-to-project@v0.5.0 
+      - name: Add labeled issue/PR to Project V2 (avoid duplicates)
+        uses: actions/github-script@v6
+        env:
+          PROJECT_V2_ID: ${{ env.PROJECT_V2_ID }}
+          PROJECT_PAT: ${{ env.PROJECT_PAT }}
         with:
-          # *** แก้ไข: ใช้ Project URL ในรูปแบบที่ Action ต้องการ ***
-          # รูปแบบ: https://github.com/users/ownerName/projects/projectNumber
-          project-url: 'https://github.com/users/nopponcha/projects/2' 
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          
-  # -----------------------------------------------
-  # 2. IN PROGRESS: เมื่อ n8n Flow 2 Assign Engineer
-  # -----------------------------------------------
+          script: |
+            const label = context.payload.label && context.payload.label.name;
+            if (label !== 'Todo') {
+              core.info('Label is not Todo — skipping.');
+              return;
+            }
+
+            const contentNodeId = context.payload.issue ? context.payload.issue.node_id
+                                  : (context.payload.pull_request ? context.payload.pull_request.node_id : null);
+            if (!contentNodeId) {
+              throw new Error('Could not find issue or pull_request node_id in payload.');
+            }
+
+            const projectId = process.env.PROJECT_V2_ID;
+            if (!projectId) throw new Error('PROJECT_V2_ID not set as repository secret.');
+
+            const token = process.env.PROJECT_PAT || process.env.GITHUB_TOKEN;
+            if (!token) throw new Error('No token available (set PROJECT_PAT secret or rely on GITHUB_TOKEN).');
+
+            const octokit = github.getOctokit(token);
+
+            // 1) ตรวจเช็คว่ามี item อยู่ในโปรเจคแล้วหรือยัง (first:100)
+            const query = `
+              query ($projectId: ID!) {
+                projectV2(id: $projectId) {
+                  items(first: 100) {
+                    nodes {
+                      id
+                      content {
+                        __typename
+                        ... on Issue { id }
+                        ... on PullRequest { id }
+                      }
+                    }
+                  }
+                }
+              }
+            `;
+            const qres = await octokit.graphql(query, { projectId });
+            const nodes = (qres && qres.projectV2 && qres.projectV2.items && qres.projectV2.items.nodes) || [];
+
+            const exists = nodes.some(n => n.content && n.content.id === contentNodeId);
+            if (exists) {
+              core.info('Item already exists in the project — skipping add.');
+              return;
+            }
+
+            // 2) เพิ่ม item เข้า Project V2
+            const mutation = `
+              mutation ($projectId: ID!, $contentId: ID!) {
+                addProjectV2ItemById(input: {projectId: $projectId, contentId: $contentId}) {
+                  item { id }
+                }
+              }
+            `;
+            const mres = await octokit.graphql(mutation, { projectId, contentId: contentNodeId });
+            core.info('Add to project result: ' + JSON.stringify(mres));
   move_to_in_progress:
     # เงื่อนไข: ให้รัน Job นี้เฉพาะเมื่อ Issue ถูก 'assigned'
     if: github.event.action == 'assigned'
     runs-on: ubuntu-latest
-    
     steps:
-      - name: Update Project Status to 'In Progress'
-        # Action สำหรับย้าย Status โดยตรงนั้นซับซ้อนกว่า (ต้องใช้ API)
-        # Action 'actions/add-to-project' ทำได้แค่เพิ่ม Item เข้า Board
-        # การเปลี่ยน Status จะต้องตั้งค่าใน Workflows UI
-        run: echo "Item added to project. Please set 'In Progress' move rule in GitHub Projects UI."
+      - name: Set Project V2 "Status" field to "In Progress" if item exists
+        uses: actions/github-script@v6
+        env:
+          PROJECT_V2_ID: ${{ env.PROJECT_V2_ID }}
+          PROJECT_PAT: ${{ env.PROJECT_PAT }}
+        with:
+          script: |
+            const contentNodeId = context.payload.issue ? context.payload.issue.node_id : null;
+            if (!contentNodeId) {
+              core.info('No issue node_id found — skipping.');
+              return;
+            }
+            const projectId = process.env.PROJECT_V2_ID;
+            if (!projectId) throw new Error('PROJECT_V2_ID not set as repository secret.');
+            const token = process.env.PROJECT_PAT || process.env.GITHUB_TOKEN;
+            if (!token) throw new Error('No token available (set PROJECT_PAT secret or rely on GITHUB_TOKEN).');
+
+            const octokit = github.getOctokit(token);
+
+            // 1) หา item(s) ใน project ที่ตรงกับ issue
+            const itemsQuery = `
+              query ($projectId: ID!) {
+                projectV2(id: $projectId) {
+                  items(first: 100) {
+                    nodes {
+                      id
+                      content {
+                        __typename
+                        ... on Issue { id }
+                        ... on PullRequest { id }
+                      }
+                    }
+                  }
+                }
+              }
+            `;
+            const itemsRes = await octokit.graphql(itemsQuery, { projectId });
+            const nodes = (itemsRes && itemsRes.projectV2 && itemsRes.projectV2.items && itemsRes.projectV2.items.nodes) || [];
+            const matched = nodes.filter(n => n.content && n.content.id === contentNodeId);
+            if (matched.length === 0) {
+              core.info('Issue not found in project — nothing to update.');
+              return;
+            }
+            const itemId = matched[0].id;
+            core.info(`Found project item id: ${itemId}`);
+
+            // 2) หา field "Status" และ option "In Progress"
+            const fieldsQuery = `
+              query ($projectId: ID!) {
+                projectV2(id: $projectId) {
+                  fields(first:100) {
+                    nodes {
+                      id
+                      __typename
+                      ... on ProjectV2SingleSelectField {
+                        name
+                        options {
+                          id
+                          name
+                        }
+                      }
+                      ... on ProjectV2FieldCommon {
+                        name
+                      }
+                    }
+                  }
+                }
+              }
+            `;
+            const fieldsRes = await octokit.graphql(fieldsQuery, { projectId });
+            const fields = (fieldsRes && fieldsRes.projectV2 && fieldsRes.projectV2.fields && fieldsRes.projectV2.fields.nodes) || [];
+
+            // หาฟิลด์ชื่อ 'Status'
+            let statusField = fields.find(f => f.name === 'Status');
+            if (!statusField) {
+              core.info('No "Status" field found in project — cannot set In Progress.');
+              return;
+            }
+
+            // statusField ต้องเป็น single select เพื่อเลือก option
+            const options = statusField.options || [];
+            const inProgressOption = options.find(o => o.name === 'In Progress');
+            if (!inProgressOption) {
+              core.info('No "In Progress" option found for "Status" field — cannot update.');
+              return;
+            }
+            const fieldId = statusField.id;
+            const optionId = inProgressOption.id;
+
+            // 3) อัปเดต field เป็น In Progress
+            const updateMutation = `
+              mutation ($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: ID!) {
+                updateProjectV2ItemFieldValue(input: {
+                  projectId: $projectId,
+                  itemId: $itemId,
+                  fieldId: $fieldId,
+                  value: { singleSelectOptionId: $optionId }
+                }) {
+                  projectV2Item { id }
+                }
+              }
+            `;
+            const updateRes = await octokit.graphql(updateMutation, { projectId, itemId, fieldId, optionId });
+            core.info('Update Status result: ' + JSON.stringify(updateRes));
