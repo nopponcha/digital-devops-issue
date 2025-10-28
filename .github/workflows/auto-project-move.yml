@@ -2,7 +2,8 @@ name: Auto Move Project Card
 on:
   issues:
     types: [labeled, assigned, closed]
-  # ลบ issue_comment ออกจากตรงนี้
+  issue_comment: # เพิ่ม Event นี้เพื่อให้ Workflow ทำงานเมื่อมี Comment ใหม่
+    types: [created]
 
 permissions:
   contents: read
@@ -15,7 +16,7 @@ env:
   
 jobs:
   # -----------------------------------------------
-  # (Job 1 & 2 โค้ดเดิม)
+  # 1. TODO: เมื่อ Issue ถูกติด Label 'Todo'
   # -----------------------------------------------
   move_to_todo:
     if: github.event.action == 'labeled' && github.event.label.name == 'Todo'
@@ -55,6 +56,9 @@ jobs:
             
             core.info(`Successfully set item status to: Todo`);
 
+  # -----------------------------------------------
+  # 2. IN PROGRESS: เมื่อมีการ Assign ใครก็ได้
+  # -----------------------------------------------
   move_to_in_progress:
     if: github.event.action == 'assigned'
     runs-on: ubuntu-latest
@@ -97,14 +101,15 @@ jobs:
             core.info(`Successfully set item status to: In Progress`);
 
   # -----------------------------------------------
-  # 3. DONE: เมื่อ Issue ถูกปิด (แก้ไขการดึง Item ID)
+  # 3. DONE: เมื่อ Issue ถูกปิด หรือมี Comment ใหม่ (ตรวจสอบ AI Marker)
   # -----------------------------------------------
   move_to_done:
-    if: github.event.action == 'closed'
+    # เงื่อนไข: ทำงานเมื่อ Issue ถูกปิด OR มี Comment ใหม่
+    if: github.event_name == 'issues' && github.event.action == 'closed' & github.event_name == 'issue_comment'
     runs-on: ubuntu-latest
     
     steps:
-      - name: Check Last Comment and Set Status to Done
+      - name: Check Comment and Set Status to Done
         uses: actions/github-script@v6
         with:
           github-token: ${{ secrets.PROJECT_PAT }} 
@@ -115,24 +120,32 @@ jobs:
             let shouldMoveToDone = true;
             let targetCommentBody = '';
             
-            // 1. ดึง Comment ล่าสุด ( REST API ) เพื่อตรวจสอบ AI Marker
-            core.info('Issue closed. Checking last comment...');
-            
-            const REPO_OWNER = context.repo.owner;
-            const REPO_NAME = context.repo.repo;
-            const ISSUE_NUMBER = context.payload.issue.number;
+            // 1. กำหนด Comment ที่จะใช้ตรวจสอบ
+            if (context.eventName === 'issue_comment') {
+                // ถ้า Trigger มาจาก Comment ให้ใช้ Comment นั้นเป็นตัวตัดสิน
+                targetCommentBody = context.payload.comment.body;
+                core.info('Triggered by a new comment.');
+            } else if (context.eventName === 'issues' && context.payload.action === 'closed') {
+                // ถ้า Trigger มาจาก Issue ถูกปิด ให้ดึง Comment ล่าสุด (ใช้ Rest API)
+                // นี่คือการป้องกันหาก AI Comment มาพอดีก่อนการปิด Issue
+                core.info('Triggered by issue closing. Checking last comment...');
+                
+                const REPO_OWNER = context.repo.owner;
+                const REPO_NAME = context.repo.repo;
+                const ISSUE_NUMBER = context.payload.issue.number;
 
-            const comments = await github.rest.issues.listComments({
-              owner: REPO_OWNER,
-              repo: REPO_NAME,
-              issue_number: ISSUE_NUMBER,
-              per_page: 1, 
-              direction: 'desc' 
-            });
-            
-            if (comments.data.length > 0) {
-                targetCommentBody = comments.data[0].body;
-                core.info(`Found last comment from: ${comments.data[0].user.login}`);
+                const comments = await github.rest.issues.listComments({
+                  owner: REPO_OWNER,
+                  repo: REPO_NAME,
+                  issue_number: ISSUE_NUMBER,
+                  per_page: 1, 
+                  direction: 'desc' 
+                });
+                
+                if (comments.data.length > 0) {
+                    targetCommentBody = comments.data[0].body;
+                    core.info(`Found last comment from: ${comments.data[0].user.login}`);
+                }
             }
 
 
@@ -140,51 +153,20 @@ jobs:
             if (targetCommentBody.includes(AI_ANALYSIS_MARKER)) {
               core.warning(`Target comment contains marker '${AI_ANALYSIS_MARKER}'. Skipping move to Done status.`);
               shouldMoveToDone = false;
-            } else if (targetCommentBody.length > 0) {
-              core.info(`Last comment found and does not contain AI marker. Proceeding to move to Done.`);
-            } else {
-              core.info(`No new comments found upon closing. Proceeding to move to Done.`);
+            } else if (context.eventName === 'issue_comment' && targetCommentBody.trim().length === 0) {
+              // ป้องกันการย้ายสถานะถ้า comment ว่างเปล่า
+              core.info('Comment body is empty. Skipping move to Done status.');
+              shouldMoveToDone = false;
+            } else if (context.eventName === 'issue_comment') {
+              core.info(`Comment found and does not contain AI marker. Proceeding to move to Done.`);
+            } else if (context.eventName === 'issues' && context.payload.action === 'closed') {
+              core.info(`Issue closed and last comment (if any) does not contain AI marker. Proceeding to move to Done.`);
             }
 
 
             // 3. ทำการ Update สถานะถ้าผ่านเงื่อนไข
             if (shouldMoveToDone) {
-              let PROJECT_ITEM_ID;
-
-              // ********* การแก้ไขหลัก: ค้นหา Project Item ID จาก Content ID *********
-              core.info(`Searching for Project Item ID for content: ${CONTENT_ID}`);
-              try {
-                const itemRes = await github.graphql(`
-                  query getItemId($projectId: ID!, $contentId: ID!) {
-                    node(id: $projectId) {
-                      ... on ProjectV2 {
-                        items(first: 100) { # ดึงรายการ items ใน project
-                          nodes {
-                            id
-                            content { id }
-                          }
-                        }
-                      }
-                    }
-                  }
-                `, { projectId: PROJECT_ID });
-
-                const projectItems = itemRes.node.items.nodes;
-                const foundItem = projectItems.find(item => item.content && item.content.id === CONTENT_ID);
-
-                if (!foundItem) {
-                  core.setFailed(`Error: Could not find ProjectV2Item associated with Issue ID ${CONTENT_ID}. Make sure the issue was added to the project first.`);
-                  return;
-                }
-                PROJECT_ITEM_ID = foundItem.id;
-                core.info(`Found Project Item ID: ${PROJECT_ITEM_ID}`);
-
-              } catch (error) {
-                core.setFailed(`GraphQL Query Error during Item ID search: ${error.message}`);
-                return;
-              }
-              // ******************************************************************
-              
+              const PROJECT_ITEM_ID = CONTENT_ID;
               
               // 3.1 ค้นหา Field ID และ Option ID ของ Status:Done
               const projectRes = await github.graphql(`query getProjectFields($id: ID!) { node(id: $id) { ... on ProjectV2 { fields(first: 20) { nodes { ... on ProjectV2SingleSelectField { id name options { id name } } } } } } }`, { id: PROJECT_ID });
@@ -210,7 +192,7 @@ jobs:
                   }
                 }`, {
                 projectId: PROJECT_ID,
-                itemId: PROJECT_ITEM_ID, // ใช้ Project Item ID ที่ค้นหาได้
+                itemId: PROJECT_ITEM_ID, 
                 fieldId: statusFieldId,
                 optionId: doneOptionId,
               });
