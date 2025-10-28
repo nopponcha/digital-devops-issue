@@ -28,30 +28,31 @@ jobs:
           script: |
             const PROJECT_ID = process.env.PROJECT_ID;
             const CONTENT_ID = context.payload.issue.node_id;
+            let PROJECT_ITEM_ID; // ตัวแปรสำหรับเก็บ ID ของ Item ที่ถูกเพิ่ม
 
             // ----------------------------------------------------
-            // **ขั้นตอนที่ 1: เพิ่ม Issue เข้า Project V2 ก่อน**
-            // แก้ปัญหา 'Could not resolve to ProjectV2Item node'
+            // **ขั้นตอนที่ 1: เพิ่ม Issue เข้า Project V2 และดึง Item ID**
             // ----------------------------------------------------
             core.info(`Adding item ${CONTENT_ID} to project ${PROJECT_ID}...`);
-            await github.graphql(`
+            const addItemRes = await github.graphql(`
               mutation addProjectItem($projectId: ID!, $contentId: ID!) {
                 addProjectV2ItemById(input: {
                   projectId: $projectId,
                   contentId: $contentId
                 }) {
-                  item { id }
+                  item { id } // ดึง Project Item ID ที่ถูกสร้างขึ้น
                 }
               }
             `, {
               projectId: PROJECT_ID,
               contentId: CONTENT_ID,
             });
-            core.info(`Item added successfully.`);
+            PROJECT_ITEM_ID = addItemRes.addProjectV2ItemById.item.id;
+            core.info(`Item added successfully. Project Item ID: ${PROJECT_ITEM_ID}`);
 
 
             // ----------------------------------------------------
-            // **ขั้นตอนที่ 2: อัปเดตสถานะเป็น Todo**
+            // **ขั้นตอนที่ 2: อัปเดตสถานะเป็น Todo (ใช้ Item ID ใหม่)**
             // ----------------------------------------------------
             
             // 2.1 ค้นหา Field ID และ Option ID ของ Status:Todo
@@ -70,7 +71,6 @@ jobs:
             
             const statusField = projectRes.node.fields.nodes.find(f => f.name === 'Status');
             
-            // การตรวจสอบข้อผิดพลาด 1: Field Name
             if (!statusField) {
               core.setFailed("Error: 'Status' field not found. Check Field Name and case sensitivity in Project Settings.");
               return; 
@@ -79,7 +79,6 @@ jobs:
             const statusFieldId = statusField.id;
             const todoOption = statusField.options.find(o => o.name === 'Todo'); // ใช้ 'Todo' ตามโค้ดล่าสุด
             
-            // การตรวจสอบข้อผิดพลาด 2: Option Name
             if (!todoOption) {
               core.setFailed("Error: 'Todo' option not found in Status field. Check Option Name and case sensitivity in Project Settings.");
               return;
@@ -87,7 +86,6 @@ jobs:
             const todoOptionId = todoOption.id;
 
             // 2.2 ทำการ Mutation เพื่อ Update Status
-            // NOTE: เราใช้ CONTENT_ID เป็น itemId ใน ProjectV2ItemFieldValue mutation ได้
             await github.graphql(`
               mutation updateProjectStatus($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
                 updateProjectV2ItemFieldValue(input: {
@@ -100,7 +98,7 @@ jobs:
                 }
               }`, {
               projectId: PROJECT_ID,
-              itemId: CONTENT_ID,
+              itemId: PROJECT_ITEM_ID, // ใช้ Project Item ID ที่ได้จากขั้นตอนที่ 1
               fieldId: statusFieldId,
               optionId: todoOptionId,
             });
@@ -122,12 +120,16 @@ jobs:
           script: |
             const PROJECT_ID = process.env.PROJECT_ID;
             const CONTENT_ID = context.payload.issue.node_id;
+            let PROJECT_ITEM_ID; // ตัวแปรสำหรับเก็บ ID ของ Item ที่ถูกเพิ่ม
+            
+            // ฟังก์ชันสำหรับหน่วงเวลา
+            const sleep = ms => new Promise(r => setTimeout(r, ms));
 
             // ----------------------------------------------------
-            // **ขั้นตอนที่ 1: เพิ่ม Issue เข้า Project V2 ก่อน**
+            // **ขั้นตอนที่ 1: เพิ่ม Issue เข้า Project V2 และดึง Item ID**
             // ----------------------------------------------------
             core.info(`Adding item ${CONTENT_ID} to project ${PROJECT_ID}...`);
-            await github.graphql(`
+            const addItemRes = await github.graphql(`
               mutation addProjectItem($projectId: ID!, $contentId: ID!) {
                 addProjectV2ItemById(input: {
                   projectId: $projectId,
@@ -140,14 +142,21 @@ jobs:
               projectId: PROJECT_ID,
               contentId: CONTENT_ID,
             });
-            core.info(`Item added successfully.`);
-            
+            PROJECT_ITEM_ID = addItemRes.addProjectV2ItemById.item.id;
+            core.info(`Item added successfully. Project Item ID: ${PROJECT_ITEM_ID}`);
+
+            // **หน่วงเวลาเล็กน้อย (1 วินาที) เพื่อลด Race Condition**
+            await sleep(1000); 
+
             // ----------------------------------------------------
-            // **ขั้นตอนที่ 2: อัปเดตสถานะเป็น In Progress**
+            // **ขั้นตอนที่ 2: อัปเดตสถานะเป็น In Progress (ใช้ Item ID ใหม่)**
             // ----------------------------------------------------
             
             // 2.1 ค้นหา Field ID และ Option ID ของ Status:In Progress
-            const projectRes = await github.graphql(`
+            const projectRes = await github.graphql(/* ... (query code for fields) ... */);
+            // เนื่องจาก Job นี้อาจถูกรันก่อนที่ Job 1 จะเสร็จและ Field ID ถูกดึงมา จึงใช้โค้ดเดิมที่ถูกต้อง
+            
+            const projectResFields = await github.graphql(`
               query getProjectFields($id: ID!) {
                 node(id: $id) {
                   ... on ProjectV2 {
@@ -160,9 +169,8 @@ jobs:
                 }
               }`, { id: PROJECT_ID });
             
-            const statusField = projectRes.node.fields.nodes.find(f => f.name === 'Status');
+            const statusField = projectResFields.node.fields.nodes.find(f => f.name === 'Status');
             
-            // การตรวจสอบข้อผิดพลาด 1: Field Name
             if (!statusField) {
               core.setFailed("Error: 'Status' field not found. Check Field Name and case sensitivity in Project Settings.");
               return; 
@@ -171,7 +179,6 @@ jobs:
             const statusFieldId = statusField.id;
             const inProgressOption = statusField.options.find(o => o.name === 'In Progress');
             
-            // การตรวจสอบข้อผิดพลาด 2: Option Name
             if (!inProgressOption) {
               core.setFailed("Error: 'In Progress' option not found in Status field. Check Option Name and case sensitivity in Project Settings.");
               return;
@@ -191,7 +198,7 @@ jobs:
                 }
               }`, {
               projectId: PROJECT_ID,
-              itemId: CONTENT_ID,
+              itemId: PROJECT_ITEM_ID, // ใช้ Project Item ID ที่ได้จากขั้นตอนที่ 1
               fieldId: statusFieldId,
               optionId: inProgressOptionId,
             });
