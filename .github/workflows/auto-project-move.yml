@@ -2,8 +2,7 @@ name: Auto Move Project Card
 on:
   issues:
     types: [labeled, assigned, closed]
-  issue_comment: # เพิ่ม Event นี้เพื่อให้ Workflow ทำงานเมื่อมี Comment ใหม่
-    types: [created]
+  # ลบ issue_comment ออกจากตรงนี้
 
 permissions:
   contents: read
@@ -101,15 +100,15 @@ jobs:
             core.info(`Successfully set item status to: In Progress`);
 
   # -----------------------------------------------
-  # 3. DONE: เมื่อ Issue ถูกปิด หรือมี Comment ใหม่ (ตรวจสอบ AI Marker)
+  # 3. DONE: เมื่อ Issue ถูกปิด (ทั้งแบบ Close ธรรมดาและ Close with comment)
   # -----------------------------------------------
   move_to_done:
-    # เงื่อนไข: ทำงานเมื่อ Issue ถูกปิด OR มี Comment ใหม่
-    if: github.event_name == 'issues' && github.event.action == 'closed' || github.event_name == 'issue_comment'
+    # เงื่อนไข: ทำงานเมื่อ Issue ถูกปิดเท่านั้น (Action: closed)
+    if: github.event.action == 'closed'
     runs-on: ubuntu-latest
     
     steps:
-      - name: Check Comment and Set Status to Done
+      - name: Check Last Comment and Set Status to Done
         uses: actions/github-script@v6
         with:
           github-token: ${{ secrets.PROJECT_PAT }} 
@@ -120,32 +119,25 @@ jobs:
             let shouldMoveToDone = true;
             let targetCommentBody = '';
             
-            // 1. กำหนด Comment ที่จะใช้ตรวจสอบ
-            if (context.eventName === 'issue_comment') {
-                // ถ้า Trigger มาจาก Comment ให้ใช้ Comment นั้นเป็นตัวตัดสิน
-                targetCommentBody = context.payload.comment.body;
-                core.info('Triggered by a new comment.');
-            } else if (context.eventName === 'issues' && context.payload.action === 'closed') {
-                // ถ้า Trigger มาจาก Issue ถูกปิด ให้ดึง Comment ล่าสุด (ใช้ Rest API)
-                // นี่คือการป้องกันหาก AI Comment มาพอดีก่อนการปิด Issue
-                core.info('Triggered by issue closing. Checking last comment...');
-                
-                const REPO_OWNER = context.repo.owner;
-                const REPO_NAME = context.repo.repo;
-                const ISSUE_NUMBER = context.payload.issue.number;
+            // 1. ดึง Comment ล่าสุด ( REST API )
+            // ใช้เพื่อตรวจสอบว่ามีการ Comment พร้อมกับการปิด Issue หรือไม่
+            core.info('Issue closed. Checking last comment...');
+            
+            const REPO_OWNER = context.repo.owner;
+            const REPO_NAME = context.repo.repo;
+            const ISSUE_NUMBER = context.payload.issue.number;
 
-                const comments = await github.rest.issues.listComments({
-                  owner: REPO_OWNER,
-                  repo: REPO_NAME,
-                  issue_number: ISSUE_NUMBER,
-                  per_page: 1, 
-                  direction: 'desc' 
-                });
-                
-                if (comments.data.length > 0) {
-                    targetCommentBody = comments.data[0].body;
-                    core.info(`Found last comment from: ${comments.data[0].user.login}`);
-                }
+            const comments = await github.rest.issues.listComments({
+              owner: REPO_OWNER,
+              repo: REPO_NAME,
+              issue_number: ISSUE_NUMBER,
+              per_page: 1, 
+              direction: 'desc' 
+            });
+            
+            if (comments.data.length > 0) {
+                targetCommentBody = comments.data[0].body;
+                core.info(`Found last comment from: ${comments.data[0].user.login}`);
             }
 
 
@@ -153,14 +145,10 @@ jobs:
             if (targetCommentBody.includes(AI_ANALYSIS_MARKER)) {
               core.warning(`Target comment contains marker '${AI_ANALYSIS_MARKER}'. Skipping move to Done status.`);
               shouldMoveToDone = false;
-            } else if (context.eventName === 'issue_comment' && targetCommentBody.trim().length === 0) {
-              // ป้องกันการย้ายสถานะถ้า comment ว่างเปล่า
-              core.info('Comment body is empty. Skipping move to Done status.');
-              shouldMoveToDone = false;
-            } else if (context.eventName === 'issue_comment') {
-              core.info(`Comment found and does not contain AI marker. Proceeding to move to Done.`);
-            } else if (context.eventName === 'issues' && context.payload.action === 'closed') {
-              core.info(`Issue closed and last comment (if any) does not contain AI marker. Proceeding to move to Done.`);
+            } else if (targetCommentBody.length > 0) {
+              core.info(`Last comment found and does not contain AI marker. Proceeding to move to Done.`);
+            } else {
+              core.info(`No new comments found upon closing. Proceeding to move to Done.`);
             }
 
 
