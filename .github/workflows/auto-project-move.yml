@@ -24,21 +24,15 @@ jobs:
         run: |
           echo "===== DEBUG START ====="
           date
-          echo "Runner: $(uname -a)"
-          echo "User: $(whoami)"
           echo "GITHUB_EVENT_NAME: $GITHUB_EVENT_NAME"
           echo "GITHUB_REF: $GITHUB_REF"
-          echo "Project V2 ID (from secret): ${PROJECT_V2_ID:0:10}... (hidden)"
-          echo "Listing some env vars:"
-          env | grep -E 'GITHUB|PROJECT' || true
           echo "===== DEBUG END ====="
 
       - name: Add labeled issue/PR to Project V2 (avoid duplicates) — start
         uses: actions/github-script@v6
-        env:
-          PROJECT_V2_ID: ${{ env.PROJECT_V2_ID }}
-          PROJECT_PAT: ${{ env.PROJECT_PAT }}
         with:
+          # ถ้ามี PROJECT_PAT secret จะใช้ PAT, ถ้าไม่มีก็ fallback ไปที่ GITHUB_TOKEN
+          github-token: ${{ secrets.PROJECT_PAT || secrets.GITHUB_TOKEN }}
           script: |
             core.info('script start: about to run add-to-project logic');
             try {
@@ -59,13 +53,10 @@ jobs:
               const projectId = process.env.PROJECT_V2_ID;
               if (!projectId) throw new Error('PROJECT_V2_ID not set as repository secret.');
 
-              const token = process.env.PROJECT_PAT || process.env.GITHUB_TOKEN;
-              if (!token) throw new Error('No token available (set PROJECT_PAT secret or rely on GITHUB_TOKEN).');
+              // Use the octokit instance provided by the action (authenticated via with.github-token)
+              const octokit = github;
+              core.info('Using octokit provided by actions/github-script');
 
-              core.info('Creating octokit client and performing pre-check query (will timeout if network blocked)...');
-              const octokit = github.getOctokit(token);
-
-              // quick pre-check log
               core.info('Running query to list first 20 items in project (to detect existing item).');
               const query = `
                 query ($projectId: ID!) {
@@ -106,9 +97,8 @@ jobs:
               core.info('Add to project result: ' + JSON.stringify(mres));
             } catch (err) {
               core.error('Caught error in script: ' + (err && err.message ? err.message : String(err)));
-              // log full error for debugging (may contain sensitive info) — comment out in production if needed
               core.error('Full error: ' + JSON.stringify(err, Object.getOwnPropertyNames(err)));
-              throw err; // rethrow so Action marks step failed
+              throw err;
             }
       - name: Add labeled issue/PR to Project V2 — end
         run: echo "Completed add-to-project step (if no error shown above)."
@@ -128,10 +118,8 @@ jobs:
 
       - name: Set Project V2 "Status" field to "In Progress" if item exists
         uses: actions/github-script@v6
-        env:
-          PROJECT_V2_ID: ${{ env.PROJECT_V2_ID }}
-          PROJECT_PAT: ${{ env.PROJECT_PAT }}
         with:
+          github-token: ${{ secrets.PROJECT_PAT || secrets.GITHUB_TOKEN }}
           script: |
             core.info('start set-status script');
             try {
@@ -142,10 +130,8 @@ jobs:
               }
               const projectId = process.env.PROJECT_V2_ID;
               if (!projectId) throw new Error('PROJECT_V2_ID not set as repository secret.');
-              const token = process.env.PROJECT_PAT || process.env.GITHUB_TOKEN;
-              if (!token) throw new Error('No token available (set PROJECT_PAT secret or rely on GITHUB_TOKEN).');
 
-              const octokit = github.getOctokit(token);
+              const octokit = github;
               core.info('Looking up items (first 20) to find matching issue...');
               const itemsQuery = `
                 query ($projectId: ID!) {
@@ -174,8 +160,7 @@ jobs:
               const itemId = matched[0].id;
               core.info(`Found project item id: ${itemId}`);
 
-              // Remaining logic omitted for brevity — keep original update field logic here if needed
-              core.info('Completed set-status pre-checks. (You can extend update logic here.)');
+              core.info('Completed set-status pre-checks. (Extend update logic here if needed.)');
             } catch (err) {
               core.error('Error setting status: ' + (err && err.message ? err.message : String(err)));
               core.error('Full error: ' + JSON.stringify(err, Object.getOwnPropertyNames(err)));
