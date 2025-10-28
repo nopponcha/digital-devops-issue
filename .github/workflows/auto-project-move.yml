@@ -28,10 +28,9 @@ jobs:
           echo "GITHUB_REF: $GITHUB_REF"
           echo "===== DEBUG END ====="
 
-      - name: Add labeled issue/PR to Project V2 (avoid duplicates) — start
+      - name: Add labeled issue/PR to Project V2 (avoid duplicates)
         uses: actions/github-script@v6
         with:
-          # ถ้ามี PROJECT_PAT secret จะใช้ PAT, ถ้าไม่มีก็ fallback ไปที่ GITHUB_TOKEN
           github-token: ${{ secrets.PROJECT_PAT || secrets.GITHUB_TOKEN }}
           script: |
             core.info('script start: about to run add-to-project logic');
@@ -53,21 +52,23 @@ jobs:
               const projectId = process.env.PROJECT_V2_ID;
               if (!projectId) throw new Error('PROJECT_V2_ID not set as repository secret.');
 
-              // Use the octokit instance provided by the action (authenticated via with.github-token)
               const octokit = github;
               core.info('Using octokit provided by actions/github-script');
 
+              // Use node(id: ...) and on ProjectV2 to avoid "projectV2 not on Query"
               core.info('Running query to list first 20 items in project (to detect existing item).');
               const query = `
                 query ($projectId: ID!) {
-                  projectV2(id: $projectId) {
-                    items(first: 20) {
-                      nodes {
-                        id
-                        content {
-                          __typename
-                          ... on Issue { id }
-                          ... on PullRequest { id }
+                  node(id: $projectId) {
+                    ... on ProjectV2 {
+                      items(first: 20) {
+                        nodes {
+                          id
+                          content {
+                            __typename
+                            ... on Issue { id }
+                            ... on PullRequest { id }
+                          }
                         }
                       }
                     }
@@ -76,7 +77,7 @@ jobs:
               `;
               const qres = await octokit.graphql(query, { projectId });
               core.info('Query returned — now checking for existing content.');
-              const nodes = (qres && qres.projectV2 && qres.projectV2.items && qres.projectV2.items.nodes) || [];
+              const nodes = (((qres || {}).node || {}).items || {}).nodes || [];
               core.info(`Found ${nodes.length} items in project (checked first 20).`);
 
               const exists = nodes.some(n => n.content && n.content.id === contentNodeId);
@@ -100,8 +101,6 @@ jobs:
               core.error('Full error: ' + JSON.stringify(err, Object.getOwnPropertyNames(err)));
               throw err;
             }
-      - name: Add labeled issue/PR to Project V2 — end
-        run: echo "Completed add-to-project step (if no error shown above)."
 
   move_to_in_progress:
     if: github.event.action == 'assigned'
@@ -135,14 +134,16 @@ jobs:
               core.info('Looking up items (first 20) to find matching issue...');
               const itemsQuery = `
                 query ($projectId: ID!) {
-                  projectV2(id: $projectId) {
-                    items(first: 20) {
-                      nodes {
-                        id
-                        content {
-                          __typename
-                          ... on Issue { id }
-                          ... on PullRequest { id }
+                  node(id: $projectId) {
+                    ... on ProjectV2 {
+                      items(first: 20) {
+                        nodes {
+                          id
+                          content {
+                            __typename
+                            ... on Issue { id }
+                            ... on PullRequest { id }
+                          }
                         }
                       }
                     }
@@ -150,7 +151,7 @@ jobs:
                 }
               `;
               const itemsRes = await octokit.graphql(itemsQuery, { projectId });
-              const nodes = (itemsRes && itemsRes.projectV2 && itemsRes.projectV2.items && itemsRes.projectV2.items.nodes) || [];
+              const nodes = (((itemsRes || {}).node || {}).items || {}).nodes || [];
               core.info(`Found ${nodes.length} items (checked first 20).`);
               const matched = nodes.filter(n => n.content && n.content.id === contentNodeId);
               if (matched.length === 0) {
@@ -160,7 +161,64 @@ jobs:
               const itemId = matched[0].id;
               core.info(`Found project item id: ${itemId}`);
 
-              core.info('Completed set-status pre-checks. (Extend update logic here if needed.)');
+              core.info('Querying project fields to find "Status" single-select option "In Progress"...');
+              const fieldsQuery = `
+                query ($projectId: ID!) {
+                  node(id: $projectId) {
+                    ... on ProjectV2 {
+                      fields(first:100) {
+                        nodes {
+                          id
+                          __typename
+                          ... on ProjectV2SingleSelectField {
+                            name
+                            options {
+                              id
+                              name
+                            }
+                          }
+                          ... on ProjectV2FieldCommon {
+                            name
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              `;
+              const fieldsRes = await octokit.graphql(fieldsQuery, { projectId });
+              const fields = (((fieldsRes || {}).node || {}).fields || {}).nodes || [];
+
+              let statusField = fields.find(f => f.name === 'Status');
+              if (!statusField) {
+                core.info('No "Status" field found in project — cannot set In Progress.');
+                return;
+              }
+
+              const options = statusField.options || [];
+              const inProgressOption = options.find(o => o.name === 'In Progress');
+              if (!inProgressOption) {
+                core.info('No "In Progress" option found for "Status" field — cannot update.');
+                return;
+              }
+              const fieldId = statusField.id;
+              const optionId = inProgressOption.id;
+
+              core.info(`Updating item ${itemId} field ${fieldId} => option ${optionId}`);
+              const updateMutation = `
+                mutation ($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: ID!) {
+                  updateProjectV2ItemFieldValue(input: {
+                    projectId: $projectId,
+                    itemId: $itemId,
+                    fieldId: $fieldId,
+                    value: { singleSelectOptionId: $optionId }
+                  }) {
+                    projectV2Item { id }
+                  }
+                }
+              `;
+              const updateRes = await octokit.graphql(updateMutation, { projectId, itemId, fieldId, optionId });
+              core.info('Update Status result: ' + JSON.stringify(updateRes));
             } catch (err) {
               core.error('Error setting status: ' + (err && err.message ? err.message : String(err)));
               core.error('Full error: ' + JSON.stringify(err, Object.getOwnPropertyNames(err)));
