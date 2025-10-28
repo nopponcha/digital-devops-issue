@@ -5,8 +5,8 @@ on:
 
 permissions:
   contents: read
-  issues: write # สิทธิ์สำหรับการจัดการ Issue
-  pull-requests: write # อาจจะจำเป็นในการดึง Project ID 
+  issues: write
+  pull-requests: write
 
 env:
   # Project ID ที่ถูกต้องสำหรับ Project V2 'DevOps-Issue'
@@ -17,7 +17,6 @@ jobs:
   # 1. TODO: เมื่อ Issue ถูกติด Label 'Todo'
   # -----------------------------------------------
   move_to_todo:
-    # Trigger เมื่อติด Label ที่ชื่อ 'Todo'
     if: github.event.action == 'labeled' && github.event.label.name == 'Todo'
     runs-on: ubuntu-latest
     
@@ -25,10 +24,9 @@ jobs:
       - name: Set Status to Todo via GraphQL
         uses: actions/github-script@v6
         with:
-          # ใช้ Personal Access Token (PAT) ที่มีสิทธิ์ 'project' และ 'repo'
           github-token: ${{ secrets.PROJECT_PAT }} 
           script: |
-            const core = require('@actions/core');
+            // **บรรทัดนี้ถูกลบออกแล้ว** const core = require('@actions/core');
             const PROJECT_ID = process.env.PROJECT_ID;
             const CONTENT_ID = context.payload.issue.node_id;
 
@@ -48,7 +46,7 @@ jobs:
             
             const statusField = projectRes.node.fields.nodes.find(f => f.name === 'Status');
             
-            // **การตรวจสอบข้อผิดพลาด 1: Field Name**
+            // การตรวจสอบข้อผิดพลาด 1: Field Name
             if (!statusField) {
               core.setFailed("Error: 'Status' field not found. Check Field Name and case sensitivity in Project Settings.");
               return; 
@@ -57,7 +55,7 @@ jobs:
             const statusFieldId = statusField.id;
             const todoOption = statusField.options.find(o => o.name === 'Todo');
             
-            // **การตรวจสอบข้อผิดพลาด 2: Option Name**
+            // การตรวจสอบข้อผิดพลาด 2: Option Name
             if (!todoOption) {
               core.setFailed("Error: 'Todo' option not found in Status field. Check Option Name and case sensitivity in Project Settings.");
               return;
@@ -88,7 +86,6 @@ jobs:
   # 2. IN PROGRESS: เมื่อ Assign Engineer
   # -----------------------------------------------
   move_to_in_progress:
-    # Trigger เมื่อมีการ Assign
     if: github.event.action == 'assigned'
     runs-on: ubuntu-latest
     
@@ -98,7 +95,7 @@ jobs:
         with:
           github-token: ${{ secrets.PROJECT_PAT }} 
           script: |
-            const core = require('@actions/core');
+            // **บรรทัดนี้ถูกลบออกแล้ว** const core = require('@actions/core');
             const PROJECT_ID = process.env.PROJECT_ID;
             const CONTENT_ID = context.payload.issue.node_id;
             
@@ -118,7 +115,7 @@ jobs:
             
             const statusField = projectRes.node.fields.nodes.find(f => f.name === 'Status');
             
-            // **การตรวจสอบข้อผิดพลาด 1: Field Name**
+            // การตรวจสอบข้อผิดพลาด 1: Field Name
             if (!statusField) {
               core.setFailed("Error: 'Status' field not found. Check Field Name and case sensitivity in Project Settings.");
               return; 
@@ -127,7 +124,7 @@ jobs:
             const statusFieldId = statusField.id;
             const inProgressOption = statusField.options.find(o => o.name === 'In Progress');
             
-            // **การตรวจสอบข้อผิดพลาด 2: Option Name**
+            // การตรวจสอบข้อผิดพลาด 2: Option Name
             if (!inProgressOption) {
               core.setFailed("Error: 'In Progress' option not found in Status field. Check Option Name and case sensitivity in Project Settings.");
               return;
