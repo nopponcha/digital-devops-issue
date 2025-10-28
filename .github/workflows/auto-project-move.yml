@@ -1,7 +1,9 @@
 name: Auto Move Project Card
 on:
   issues:
-    types: [labeled, assigned, closed] # เพิ่ม event 'closed'
+    types: [labeled, assigned, closed]
+  issue_comment: # เพิ่ม Event นี้เพื่อให้ Workflow ทำงานเมื่อมี Comment ใหม่
+    types: [created]
 
 permissions:
   contents: read
@@ -15,7 +17,6 @@ env:
 jobs:
   # -----------------------------------------------
   # 1. TODO: เมื่อ Issue ถูกติด Label 'Todo'
-  # (โค้ดเดิมที่ทำงานได้แล้ว)
   # -----------------------------------------------
   move_to_todo:
     if: github.event.action == 'labeled' && github.event.label.name == 'Todo'
@@ -33,21 +34,11 @@ jobs:
 
             // ขั้นตอนที่ 1: เพิ่ม Issue เข้า Project V2 และดึง Item ID
             core.info(`Adding item ${CONTENT_ID} to project ${PROJECT_ID}...`);
-            const addItemRes = await github.graphql(`
-              mutation addProjectItem($projectId: ID!, $contentId: ID!) {
-                addProjectV2ItemById(input: {
-                  projectId: $projectId,
-                  contentId: $contentId
-                }) {
-                  item { id }
-                }
-              }
-            `, { projectId: PROJECT_ID, contentId: CONTENT_ID });
+            const addItemRes = await github.graphql(`mutation addProjectItem($projectId: ID!, $contentId: ID!) { addProjectV2ItemById(input: { projectId: $projectId, contentId: $contentId }) { item { id } } }`, { projectId: PROJECT_ID, contentId: CONTENT_ID });
             PROJECT_ITEM_ID = addItemRes.addProjectV2ItemById.item.id;
             core.info(`Item added successfully. Project Item ID: ${PROJECT_ITEM_ID}`);
 
             // ขั้นตอนที่ 2: อัปเดตสถานะเป็น Todo
-            // ... (โค้ด GraphQL Query และ Mutation Update Status เหมือนเดิม)
             const projectRes = await github.graphql(`query getProjectFields($id: ID!) { node(id: $id) { ... on ProjectV2 { fields(first: 20) { nodes { ... on ProjectV2SingleSelectField { id name options { id name } } } } } } }`, { id: PROJECT_ID });
             const statusField = projectRes.node.fields.nodes.find(f => f.name === 'Status');
             if (!statusField) { core.setFailed("Error: 'Status' field not found."); return; }
@@ -67,7 +58,6 @@ jobs:
 
   # -----------------------------------------------
   # 2. IN PROGRESS: เมื่อมีการ Assign ใครก็ได้
-  # (โค้ดเดิมที่ทำงานได้แล้ว)
   # -----------------------------------------------
   move_to_in_progress:
     if: github.event.action == 'assigned'
@@ -93,7 +83,6 @@ jobs:
             await sleep(1000); 
 
             // ขั้นตอนที่ 2: อัปเดตสถานะเป็น In Progress
-            // ... (โค้ด GraphQL Query และ Mutation Update Status เหมือนเดิม)
             const projectResFields = await github.graphql(`query getProjectFields($id: ID!) { node(id: $id) { ... on ProjectV2 { fields(first: 20) { nodes { ... on ProjectV2SingleSelectField { id name options { id name } } } } } } }`, { id: PROJECT_ID });
             const statusField = projectResFields.node.fields.nodes.find(f => f.name === 'Status');
             if (!statusField) { core.setFailed("Error: 'Status' field not found."); return; }
@@ -112,82 +101,85 @@ jobs:
             core.info(`Successfully set item status to: In Progress`);
 
   # -----------------------------------------------
-  # 3. DONE: เมื่อ Issue ถูกปิด (Closed)
-  # (เพิ่มเงื่อนไขตรวจสอบ Comment)
+  # 3. DONE: เมื่อ Issue ถูกปิด หรือมี Comment ใหม่ (ตรวจสอบ AI Marker)
   # -----------------------------------------------
   move_to_done:
-    if: github.event.action == 'closed'
+    # เงื่อนไข: ทำงานเมื่อ Issue ถูกปิด OR มี Comment ใหม่
+    if: github.event_name == 'issues' && github.event.action == 'closed' || github.event_name == 'issue_comment'
     runs-on: ubuntu-latest
     
     steps:
-      - name: Check Last Comment and Set Status to Done
+      - name: Check Comment and Set Status to Done
         uses: actions/github-script@v6
         with:
           github-token: ${{ secrets.PROJECT_PAT }} 
           script: |
             const PROJECT_ID = process.env.PROJECT_ID;
-            const ISSUE_NUMBER = context.payload.issue.number;
-            const REPO_OWNER = context.repo.owner;
-            const REPO_NAME = context.repo.repo;
             const CONTENT_ID = context.payload.issue.node_id;
-
-            // 1. ดึง Comment ล่าสุด
-            // ใช้ REST API เพื่อดึง comments เรียงจากใหม่ไปเก่า (desc) และจำกัด 1 comment
-            const comments = await github.rest.issues.listComments({
-              owner: REPO_OWNER,
-              repo: REPO_NAME,
-              issue_number: ISSUE_NUMBER,
-              per_page: 1, 
-              direction: 'desc' 
-            });
-
-            const lastComment = comments.data[0];
             const AI_ANALYSIS_MARKER = '[AUTOMATED AI ANALYSIS]';
             let shouldMoveToDone = true;
+            let targetCommentBody = '';
+            
+            // 1. กำหนด Comment ที่จะใช้ตรวจสอบ
+            if (context.eventName === 'issue_comment') {
+                // ถ้า Trigger มาจาก Comment ให้ใช้ Comment นั้นเป็นตัวตัดสิน
+                targetCommentBody = context.payload.comment.body;
+                core.info('Triggered by a new comment.');
+            } else if (context.eventName === 'issues' && context.payload.action === 'closed') {
+                // ถ้า Trigger มาจาก Issue ถูกปิด ให้ดึง Comment ล่าสุด (ใช้ Rest API)
+                // นี่คือการป้องกันหาก AI Comment มาพอดีก่อนการปิด Issue
+                core.info('Triggered by issue closing. Checking last comment...');
+                
+                const REPO_OWNER = context.repo.owner;
+                const REPO_NAME = context.repo.repo;
+                const ISSUE_NUMBER = context.payload.issue.number;
 
-            if (lastComment && lastComment.body.includes(AI_ANALYSIS_MARKER)) {
-              core.warning(`Last comment contains '${AI_ANALYSIS_MARKER}'. Skipping move to Done status.`);
-              shouldMoveToDone = false;
-            } else if (lastComment) {
-              core.info(`Last comment does not contain '${AI_ANALYSIS_MARKER}'. Proceeding to move to Done.`);
-            } else {
-              core.info(`No comments found. Proceeding to move to Done.`);
+                const comments = await github.rest.issues.listComments({
+                  owner: REPO_OWNER,
+                  repo: REPO_NAME,
+                  issue_number: ISSUE_NUMBER,
+                  per_page: 1, 
+                  direction: 'desc' 
+                });
+                
+                if (comments.data.length > 0) {
+                    targetCommentBody = comments.data[0].body;
+                    core.info(`Found last comment from: ${comments.data[0].user.login}`);
+                }
             }
 
 
+            // 2. ตรวจสอบเงื่อนไข AI Marker
+            if (targetCommentBody.includes(AI_ANALYSIS_MARKER)) {
+              core.warning(`Target comment contains marker '${AI_ANALYSIS_MARKER}'. Skipping move to Done status.`);
+              shouldMoveToDone = false;
+            } else if (context.eventName === 'issue_comment' && targetCommentBody.trim().length === 0) {
+              // ป้องกันการย้ายสถานะถ้า comment ว่างเปล่า
+              core.info('Comment body is empty. Skipping move to Done status.');
+              shouldMoveToDone = false;
+            } else if (context.eventName === 'issue_comment') {
+              core.info(`Comment found and does not contain AI marker. Proceeding to move to Done.`);
+            } else if (context.eventName === 'issues' && context.payload.action === 'closed') {
+              core.info(`Issue closed and last comment (if any) does not contain AI marker. Proceeding to move to Done.`);
+            }
+
+
+            // 3. ทำการ Update สถานะถ้าผ่านเงื่อนไข
             if (shouldMoveToDone) {
-              let PROJECT_ITEM_ID;
-
-              // 1.1 ค้นหา Project Item ID (จำเป็นต้องใช้ Item ID ในการอัปเดตสถานะ)
-              // NOTE: ใน V2 เราสามารถใช้ CONTENT_ID (Issue Node ID) เป็น itemId ได้เลย
-              PROJECT_ITEM_ID = CONTENT_ID;
-              core.info(`Using Issue Node ID as Project Item ID: ${PROJECT_ITEM_ID}`);
-
-              // 1.2 ค้นหา Field ID และ Option ID ของ Status:Done
-              const projectRes = await github.graphql(`
-                query getProjectFields($id: ID!) {
-                  node(id: $id) {
-                    ... on ProjectV2 {
-                      fields(first: 20) {
-                        nodes {
-                          ... on ProjectV2SingleSelectField { id name options { id name } }
-                        }
-                      }
-                    }
-                  }
-                }`, { id: PROJECT_ID });
+              const PROJECT_ITEM_ID = CONTENT_ID;
+              
+              // 3.1 ค้นหา Field ID และ Option ID ของ Status:Done
+              const projectRes = await github.graphql(`query getProjectFields($id: ID!) { node(id: $id) { ... on ProjectV2 { fields(first: 20) { nodes { ... on ProjectV2SingleSelectField { id name options { id name } } } } } } }`, { id: PROJECT_ID });
               
               const statusField = projectRes.node.fields.nodes.find(f => f.name === 'Status');
-              
               if (!statusField) { core.setFailed("Error: 'Status' field not found."); return; }
               const statusFieldId = statusField.id;
               
-              const doneOption = statusField.options.find(o => o.name === 'Done'); // ต้องตรงกับชื่อ Option 'Done'
-              
+              const doneOption = statusField.options.find(o => o.name === 'Done'); 
               if (!doneOption) { core.setFailed("Error: 'Done' option not found."); return; }
               const doneOptionId = doneOption.id;
 
-              // 1.3 ทำการ Mutation เพื่อ Update Status
+              // 3.2 ทำการ Mutation เพื่อ Update Status
               await github.graphql(`
                 mutation updateProjectStatus($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
                   updateProjectV2ItemFieldValue(input: {
@@ -208,5 +200,5 @@ jobs:
               core.info(`Successfully set item status to: Done`);
 
             } else {
-              core.info(`Status not updated due to AI Analysis marker.`);
+              core.info(`Status update skipped.`);
             }
