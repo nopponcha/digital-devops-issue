@@ -1,0 +1,132 @@
+name: Auto Move Project Card
+on:
+  issues:
+    types: [labeled, assigned]
+
+permissions:
+  contents: read
+  issues: write # จำเป็นสำหรับการทำงานกับ Issue
+  pull-requests: write # จำเป็นสำหรับการทำงานกับ PR
+
+env:
+  # ต้องใช้ Project V2 ID ของคุณ (จากข้อมูลก่อนหน้า)
+  PROJECT_ID: PVT_kwHOAhgQ884BGiVe 
+  
+jobs:
+  # -----------------------------------------------
+  # 1. TODO: เมื่อ n8n ติด Label 'Todo'
+  # -----------------------------------------------
+  move_to_todo:
+    if: github.event.action == 'labeled' && github.event.label.name == 'Todo'
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Set Status to Todo via GraphQL
+        uses: actions/github-script@v6
+        with:
+          # ใช้ PROJECT_PAT ที่คุณสร้างและมีสิทธิ์ 'project'
+          github-token: ${{ secrets.PROJECT_PAT }} 
+          script: |
+            const PROJECT_ID = process.env.PROJECT_ID;
+            const CONTENT_ID = context.payload.issue.node_id;
+
+            // 1. ค้นหา Field ID และ Option ID ของ Status:Todo
+            const projectRes = await github.graphql(`
+              query getProjectFields($id: ID!) {
+                node(id: $id) {
+                  ... on ProjectV2 {
+                    fields(first: 20) {
+                      nodes {
+                        ... on ProjectV2SingleSelectField { id name options { id name } }
+                      }
+                    }
+                  }
+                }
+              }`, { id: PROJECT_ID });
+            
+            const statusField = projectRes.node.fields.nodes.find(f => f.name === 'Status');
+            if (!statusField) throw new Error("Status field not found in project.");
+            
+            const statusFieldId = statusField.id;
+            const todoOptionId = statusField.options.find(o => o.name === 'Todo').id;
+            
+            if (!todoOptionId) throw new Error("Todo option ID not found.");
+
+            // 2. ทำการ Mutation เพื่อ Update Status
+            await github.graphql(`
+              mutation updateProjectStatus($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
+                updateProjectV2ItemFieldValue(input: {
+                  projectId: $projectId,
+                  itemId: $itemId,
+                  fieldId: $fieldId,
+                  value: { singleSelectOptionId: $optionId }
+                }) {
+                  projectV2Item { id }
+                }
+              }`, {
+              projectId: PROJECT_ID,
+              itemId: CONTENT_ID,
+              fieldId: statusFieldId,
+              optionId: todoOptionId,
+            });
+            
+            core.info(`Successfully moved item ${CONTENT_ID} to Status: Todo`);
+
+  # -----------------------------------------------
+  # 2. IN PROGRESS: เมื่อ Assign Engineer
+  # -----------------------------------------------
+  move_to_in_progress:
+    # เงื่อนไข: เมื่อ Assign
+    if: github.event.action == 'assigned'
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Set Status to In Progress via GraphQL
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.PROJECT_PAT }} 
+          script: |
+            const PROJECT_ID = process.env.PROJECT_ID;
+            const CONTENT_ID = context.payload.issue.node_id;
+            
+            // 1. ค้นหา Field ID และ Option ID ของ Status:In Progress
+            const projectRes = await github.graphql(`
+              query getProjectFields($id: ID!) {
+                node(id: $id) {
+                  ... on ProjectV2 {
+                    fields(first: 20) {
+                      nodes {
+                        ... on ProjectV2SingleSelectField { id name options { id name } }
+                      }
+                    }
+                  }
+                }
+              }`, { id: PROJECT_ID });
+            
+            const statusField = projectRes.node.fields.nodes.find(f => f.name === 'Status');
+            if (!statusField) throw new Error("Status field not found in project.");
+            
+            const statusFieldId = statusField.id;
+            const inProgressOptionId = statusField.options.find(o => o.name === 'In Progress').id;
+            
+            if (!inProgressOptionId) throw new Error("In Progress option ID not found.");
+
+            // 2. ทำการ Mutation เพื่อ Update Status
+            await github.graphql(`
+              mutation updateProjectStatus($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
+                updateProjectV2ItemFieldValue(input: {
+                  projectId: $projectId,
+                  itemId: $itemId,
+                  fieldId: $fieldId,
+                  value: { singleSelectOptionId: $optionId }
+                }) {
+                  projectV2Item { id }
+                }
+              }`, {
+              projectId: PROJECT_ID,
+              itemId: CONTENT_ID,
+              fieldId: statusFieldId,
+              optionId: inProgressOptionId,
+            });
+            
+            core.info(`Successfully moved item ${CONTENT_ID} to Status: In Progress`);
