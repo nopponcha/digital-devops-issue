@@ -5,12 +5,12 @@ on:
 
 permissions:
   contents: read
-  issues: write # จำเป็นสำหรับการทำงานกับ Issue
-  pull-requests: write # จำเป็นสำหรับการทำงานกับ PR
+  issues: write
+  pull-requests: write
 
 env:
-  # ต้องใช้ Project V2 ID ของคุณ (จากข้อมูลก่อนหน้า)
-  PROJECT_ID: PVT_kwHOAhgQ884BGiVe 
+  # *** เปลี่ยนไปใช้ Project ID ใหม่ที่ได้จาก cURL ***
+  PROJECT_ID: PVT_kwHOAhgQ884BGnV2 
   
 jobs:
   # -----------------------------------------------
@@ -76,7 +76,6 @@ jobs:
   # 2. IN PROGRESS: เมื่อ Assign Engineer
   # -----------------------------------------------
   move_to_in_progress:
-    # เงื่อนไข: เมื่อ Assign
     if: github.event.action == 'assigned'
     runs-on: ubuntu-latest
     
