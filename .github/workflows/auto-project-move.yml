@@ -15,7 +15,7 @@ env:
   
 jobs:
   # -----------------------------------------------
-  # 1. TODO: เมื่อ Issue ถูกติด Label 'Todo'
+  # (Job 1 & 2 โค้ดเดิม)
   # -----------------------------------------------
   move_to_todo:
     if: github.event.action == 'labeled' && github.event.label.name == 'Todo'
@@ -55,9 +55,6 @@ jobs:
             
             core.info(`Successfully set item status to: Todo`);
 
-  # -----------------------------------------------
-  # 2. IN PROGRESS: เมื่อมีการ Assign ใครก็ได้
-  # -----------------------------------------------
   move_to_in_progress:
     if: github.event.action == 'assigned'
     runs-on: ubuntu-latest
@@ -100,10 +97,9 @@ jobs:
             core.info(`Successfully set item status to: In Progress`);
 
   # -----------------------------------------------
-  # 3. DONE: เมื่อ Issue ถูกปิด (ทั้งแบบ Close ธรรมดาและ Close with comment)
+  # 3. DONE: เมื่อ Issue ถูกปิด (แก้ไขการดึง Item ID)
   # -----------------------------------------------
   move_to_done:
-    # เงื่อนไข: ทำงานเมื่อ Issue ถูกปิดเท่านั้น (Action: closed)
     if: github.event.action == 'closed'
     runs-on: ubuntu-latest
     
@@ -119,8 +115,7 @@ jobs:
             let shouldMoveToDone = true;
             let targetCommentBody = '';
             
-            // 1. ดึง Comment ล่าสุด ( REST API )
-            // ใช้เพื่อตรวจสอบว่ามีการ Comment พร้อมกับการปิด Issue หรือไม่
+            // 1. ดึง Comment ล่าสุด ( REST API ) เพื่อตรวจสอบ AI Marker
             core.info('Issue closed. Checking last comment...');
             
             const REPO_OWNER = context.repo.owner;
@@ -154,7 +149,42 @@ jobs:
 
             // 3. ทำการ Update สถานะถ้าผ่านเงื่อนไข
             if (shouldMoveToDone) {
-              const PROJECT_ITEM_ID = CONTENT_ID;
+              let PROJECT_ITEM_ID;
+
+              // ********* การแก้ไขหลัก: ค้นหา Project Item ID จาก Content ID *********
+              core.info(`Searching for Project Item ID for content: ${CONTENT_ID}`);
+              try {
+                const itemRes = await github.graphql(`
+                  query getItemId($projectId: ID!, $contentId: ID!) {
+                    node(id: $projectId) {
+                      ... on ProjectV2 {
+                        items(first: 100) { # ดึงรายการ items ใน project
+                          nodes {
+                            id
+                            content { id }
+                          }
+                        }
+                      }
+                    }
+                  }
+                `, { projectId: PROJECT_ID });
+
+                const projectItems = itemRes.node.items.nodes;
+                const foundItem = projectItems.find(item => item.content && item.content.id === CONTENT_ID);
+
+                if (!foundItem) {
+                  core.setFailed(`Error: Could not find ProjectV2Item associated with Issue ID ${CONTENT_ID}. Make sure the issue was added to the project first.`);
+                  return;
+                }
+                PROJECT_ITEM_ID = foundItem.id;
+                core.info(`Found Project Item ID: ${PROJECT_ITEM_ID}`);
+
+              } catch (error) {
+                core.setFailed(`GraphQL Query Error during Item ID search: ${error.message}`);
+                return;
+              }
+              // ******************************************************************
+              
               
               // 3.1 ค้นหา Field ID และ Option ID ของ Status:Done
               const projectRes = await github.graphql(`query getProjectFields($id: ID!) { node(id: $id) { ... on ProjectV2 { fields(first: 20) { nodes { ... on ProjectV2SingleSelectField { id name options { id name } } } } } } }`, { id: PROJECT_ID });
@@ -180,7 +210,7 @@ jobs:
                   }
                 }`, {
                 projectId: PROJECT_ID,
-                itemId: PROJECT_ITEM_ID, 
+                itemId: PROJECT_ITEM_ID, // ใช้ Project Item ID ที่ค้นหาได้
                 fieldId: statusFieldId,
                 optionId: doneOptionId,
               });
