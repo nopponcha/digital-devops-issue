@@ -28,10 +28,10 @@ jobs:
           script: |
             const PROJECT_ID = process.env.PROJECT_ID;
             const CONTENT_ID = context.payload.issue.node_id;
-            let PROJECT_ITEM_ID; // ตัวแปรสำหรับเก็บ ID ของ Item ที่ถูกเพิ่ม
+            let PROJECT_ITEM_ID;
 
             // ----------------------------------------------------
-            // **ขั้นตอนที่ 1: เพิ่ม Issue เข้า Project V2 และดึง Item ID**
+            // ขั้นตอนที่ 1: เพิ่ม Issue เข้า Project V2 และดึง Item ID
             // ----------------------------------------------------
             core.info(`Adding item ${CONTENT_ID} to project ${PROJECT_ID}...`);
             const addItemRes = await github.graphql(`
@@ -40,7 +40,7 @@ jobs:
                   projectId: $projectId,
                   contentId: $contentId
                 }) {
-                  item { id } // ดึง Project Item ID ที่ถูกสร้างขึ้น
+                  item { id } 
                 }
               }
             `, {
@@ -52,7 +52,7 @@ jobs:
 
 
             // ----------------------------------------------------
-            // **ขั้นตอนที่ 2: อัปเดตสถานะเป็น Todo (ใช้ Item ID ใหม่)**
+            // ขั้นตอนที่ 2: อัปเดตสถานะเป็น Todo (ใช้ Item ID ใหม่)
             // ----------------------------------------------------
             
             // 2.1 ค้นหา Field ID และ Option ID ของ Status:Todo
@@ -77,7 +77,7 @@ jobs:
             }
             
             const statusFieldId = statusField.id;
-            const todoOption = statusField.options.find(o => o.name === 'Todo'); // ใช้ 'Todo' ตามโค้ดล่าสุด
+            const todoOption = statusField.options.find(o => o.name === 'Todo'); 
             
             if (!todoOption) {
               core.setFailed("Error: 'Todo' option not found in Status field. Check Option Name and case sensitivity in Project Settings.");
@@ -98,7 +98,7 @@ jobs:
                 }
               }`, {
               projectId: PROJECT_ID,
-              itemId: PROJECT_ITEM_ID, // ใช้ Project Item ID ที่ได้จากขั้นตอนที่ 1
+              itemId: PROJECT_ITEM_ID, 
               fieldId: statusFieldId,
               optionId: todoOptionId,
             });
@@ -120,13 +120,12 @@ jobs:
           script: |
             const PROJECT_ID = process.env.PROJECT_ID;
             const CONTENT_ID = context.payload.issue.node_id;
-            let PROJECT_ITEM_ID; // ตัวแปรสำหรับเก็บ ID ของ Item ที่ถูกเพิ่ม
+            let PROJECT_ITEM_ID; 
             
-            // ฟังก์ชันสำหรับหน่วงเวลา
             const sleep = ms => new Promise(r => setTimeout(r, ms));
 
             // ----------------------------------------------------
-            // **ขั้นตอนที่ 1: เพิ่ม Issue เข้า Project V2 และดึง Item ID**
+            // ขั้นตอนที่ 1: เพิ่ม Issue เข้า Project V2 และดึง Item ID
             // ----------------------------------------------------
             core.info(`Adding item ${CONTENT_ID} to project ${PROJECT_ID}...`);
             const addItemRes = await github.graphql(`
@@ -145,17 +144,13 @@ jobs:
             PROJECT_ITEM_ID = addItemRes.addProjectV2ItemById.item.id;
             core.info(`Item added successfully. Project Item ID: ${PROJECT_ITEM_ID}`);
 
-            // **หน่วงเวลาเล็กน้อย (1 วินาที) เพื่อลด Race Condition**
             await sleep(1000); 
 
             // ----------------------------------------------------
-            // **ขั้นตอนที่ 2: อัปเดตสถานะเป็น In Progress (ใช้ Item ID ใหม่)**
+            // ขั้นตอนที่ 2: อัปเดตสถานะเป็น In Progress (ใช้ Item ID ใหม่)
             // ----------------------------------------------------
             
             // 2.1 ค้นหา Field ID และ Option ID ของ Status:In Progress
-            const projectRes = await github.graphql(/* ... (query code for fields) ... */);
-            // เนื่องจาก Job นี้อาจถูกรันก่อนที่ Job 1 จะเสร็จและ Field ID ถูกดึงมา จึงใช้โค้ดเดิมที่ถูกต้อง
-            
             const projectResFields = await github.graphql(`
               query getProjectFields($id: ID!) {
                 node(id: $id) {
@@ -198,7 +193,7 @@ jobs:
                 }
               }`, {
               projectId: PROJECT_ID,
-              itemId: PROJECT_ITEM_ID, // ใช้ Project Item ID ที่ได้จากขั้นตอนที่ 1
+              itemId: PROJECT_ITEM_ID, 
               fieldId: statusFieldId,
               optionId: inProgressOptionId,
             });
