@@ -125,7 +125,6 @@ jobs:
             const REPO_NAME = context.repo.repo;
             const ISSUE_NUMBER = context.payload.issue.number;
 
-            // การเรียก REST API จะใช้ได้ทั้งกรณี Close ธรรมดาและ Close with comment
             const comments = await github.rest.issues.listComments({
               owner: REPO_OWNER,
               repo: REPO_NAME,
@@ -155,26 +154,34 @@ jobs:
             if (shouldMoveToDone) {
               let PROJECT_ITEM_ID;
 
-              // ********* ค้นหา Project Item ID จาก Content ID *********
+              // ********* การแก้ไข: ปรับปรุง GraphQL Query เพื่อดึง Item ID *********
               core.info(`Searching for Project Item ID for content: ${CONTENT_ID}`);
               try {
+                // Query ใหม่: ดึงรายการ items และใช้ Inline Fragment เพื่อดึง id ที่ถูกต้อง
                 const itemRes = await github.graphql(`
-                  query getItemId($projectId: ID!, $contentId: ID!) {
+                  query getItemId($projectId: ID!) {
                     node(id: $projectId) {
                       ... on ProjectV2 {
                         items(first: 100) {
                           nodes {
                             id
-                            content { id }
+                            content {
+                              __typename
+                              ... on Issue { id }
+                              ... on PullRequest { id }
+                            }
                           }
                         }
                       }
                     }
                   }
-                `, { projectId: PROJECT_ID });
+                `, { projectId: PROJECT_ID }); // ไม่ต้องส่ง $contentId ในตัวแปร
 
                 const projectItems = itemRes.node.items.nodes;
-                const foundItem = projectItems.find(item => item.content && item.content.id === CONTENT_ID);
+                // ตรวจสอบ content.id ที่ตรงกับ CONTENT_ID
+                const foundItem = projectItems.find(item => 
+                  item.content && (item.content.id === CONTENT_ID)
+                );
 
                 if (!foundItem) {
                   core.setFailed(`Error: Could not find ProjectV2Item associated with Issue ID ${CONTENT_ID}. Make sure the issue was added to the project first.`);
