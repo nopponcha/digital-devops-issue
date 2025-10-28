@@ -1,3 +1,4 @@
+# Updated workflow: try node(id: PROJECT_V2_ID) first; if that fails, fallback to user(projectV2(number:...))
 name: Auto Move Project Card
 on:
   issues:
@@ -11,8 +12,11 @@ permissions:
   contents: read
 
 env:
+  # set secrets PROJECT_V2_ID and optionally PROJECT_PAT
   PROJECT_V2_ID: ${{ secrets.PROJECT_V2_ID }}
   PROJECT_PAT: ${{ secrets.PROJECT_PAT }}
+  PROJECT_NUMBER: "2"          # project number from URL (users/nopponcha/projects/2)
+  PROJECT_OWNER: "nopponcha"   # owner login for the project
 
 jobs:
   move_to_todo:
@@ -20,207 +24,166 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Debug — runner & env info
+      - name: Debug — runner info
         run: |
           echo "===== DEBUG START ====="
           date
           echo "GITHUB_EVENT_NAME: $GITHUB_EVENT_NAME"
           echo "GITHUB_REF: $GITHUB_REF"
+          echo "PROJECT_V2_ID (masked): ${PROJECT_V2_ID:0:6}..."
+          echo "PROJECT_NUMBER: $PROJECT_NUMBER"
+          echo "PROJECT_OWNER: $PROJECT_OWNER"
           echo "===== DEBUG END ====="
 
-      - name: Add labeled issue/PR to Project V2 (avoid duplicates)
+      - name: Add labeled issue/PR to Project V2 (with fallback)
         uses: actions/github-script@v6
         with:
           github-token: ${{ secrets.PROJECT_PAT || secrets.GITHUB_TOKEN }}
           script: |
-            core.info('script start: about to run add-to-project logic');
-            try {
-              const label = context.payload.label && context.payload.label.name;
-              core.info(`Payload label: ${label}`);
-              if (label !== 'Todo') {
-                core.info('Label is not Todo — skipping.');
-                return;
-              }
-
-              const contentNodeId = context.payload.issue ? context.payload.issue.node_id
-                                    : (context.payload.pull_request ? context.payload.pull_request.node_id : null);
-              if (!contentNodeId) {
-                throw new Error('Could not find issue or pull_request node_id in payload.');
-              }
-              core.info(`contentNodeId: ${contentNodeId}`);
-
-              const projectId = process.env.PROJECT_V2_ID;
-              if (!projectId) throw new Error('PROJECT_V2_ID not set as repository secret.');
-
-              const octokit = github;
-              core.info('Using octokit provided by actions/github-script');
-
-              // Use node(id: ...) and on ProjectV2 to avoid "projectV2 not on Query"
-              core.info('Running query to list first 20 items in project (to detect existing item).');
-              const query = `
-                query ($projectId: ID!) {
-                  node(id: $projectId) {
-                    ... on ProjectV2 {
-                      items(first: 20) {
-                        nodes {
-                          id
-                          content {
-                            __typename
-                            ... on Issue { id }
-                            ... on PullRequest { id }
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              `;
-              const qres = await octokit.graphql(query, { projectId });
-              core.info('Query returned — now checking for existing content.');
-              const nodes = (((qres || {}).node || {}).items || {}).nodes || [];
-              core.info(`Found ${nodes.length} items in project (checked first 20).`);
-
-              const exists = nodes.some(n => n.content && n.content.id === contentNodeId);
-              if (exists) {
-                core.info('Item already exists in the project — skipping add.');
-                return;
-              }
-
-              core.info('Item not found — calling addProjectV2ItemById mutation.');
-              const mutation = `
-                mutation ($projectId: ID!, $contentId: ID!) {
-                  addProjectV2ItemById(input: {projectId: $projectId, contentId: $contentId}) {
-                    item { id }
-                  }
-                }
-              `;
-              const mres = await octokit.graphql(mutation, { projectId, contentId: contentNodeId });
-              core.info('Add to project result: ' + JSON.stringify(mres));
-            } catch (err) {
-              core.error('Caught error in script: ' + (err && err.message ? err.message : String(err)));
-              core.error('Full error: ' + JSON.stringify(err, Object.getOwnPropertyNames(err)));
-              throw err;
+            core.info('Start add-to-project logic');
+            const label = context.payload.label && context.payload.label.name;
+            core.info(`Payload label: ${label}`);
+            if (label !== 'Todo') {
+              core.info('Label is not Todo — skipping.');
+              return;
             }
 
-  move_to_in_progress:
-    if: github.event.action == 'assigned'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Debug — runner & env info (assign)
-        run: |
-          echo "===== DEBUG ASSIGN START ====="
-          date
-          echo "GITHUB_EVENT_NAME: $GITHUB_EVENT_NAME"
-          echo "GITHUB_ACTOR: $GITHUB_ACTOR"
-          echo "===== DEBUG ASSIGN END ====="
+            const contentNodeId = context.payload.issue ? context.payload.issue.node_id
+                                  : (context.payload.pull_request ? context.payload.pull_request.node_id : null);
+            if (!contentNodeId) throw new Error('No issue/PR node_id in payload.');
 
-      - name: Set Project V2 "Status" field to "In Progress" if item exists
-        uses: actions/github-script@v6
-        with:
-          github-token: ${{ secrets.PROJECT_PAT || secrets.GITHUB_TOKEN }}
-          script: |
-            core.info('start set-status script');
-            try {
-              const contentNodeId = context.payload.issue ? context.payload.issue.node_id : null;
-              if (!contentNodeId) {
-                core.info('No issue node_id found — skipping.');
-                return;
-              }
-              const projectId = process.env.PROJECT_V2_ID;
-              if (!projectId) throw new Error('PROJECT_V2_ID not set as repository secret.');
+            const providedProjectId = process.env.PROJECT_V2_ID;
+            const projectNumber = process.env.PROJECT_NUMBER || "2";
+            const projectOwner = process.env.PROJECT_OWNER || context.repo.owner;
 
-              const octokit = github;
-              core.info('Looking up items (first 20) to find matching issue...');
-              const itemsQuery = `
-                query ($projectId: ID!) {
-                  node(id: $projectId) {
-                    ... on ProjectV2 {
-                      items(first: 20) {
-                        nodes {
-                          id
-                          content {
-                            __typename
-                            ... on Issue { id }
-                            ... on PullRequest { id }
-                          }
-                        }
+            if (!providedProjectId) {
+              core.warning('PROJECT_V2_ID secret not set — attempting to find project by owner+number (fallback).');
+            } else {
+              core.info(`Attempting node(id:${providedProjectId}) lookup.`);
+            }
+
+            const octokit = github;
+
+            // helper: try to resolve project node by global id
+            async function tryNodeLookup(projectId) {
+              try {
+                const q = `
+                  query ($projectId: ID!) {
+                    node(id: $projectId) {
+                      ... on ProjectV2 {
+                        id
+                        title
                       }
                     }
                   }
-                }
-              `;
-              const itemsRes = await octokit.graphql(itemsQuery, { projectId });
-              const nodes = (((itemsRes || {}).node || {}).items || {}).nodes || [];
-              core.info(`Found ${nodes.length} items (checked first 20).`);
-              const matched = nodes.filter(n => n.content && n.content.id === contentNodeId);
-              if (matched.length === 0) {
-                core.info('Issue not found in project — nothing to update.');
-                return;
+                `;
+                const res = await octokit.graphql(q, { projectId });
+                return (res && res.node && res.node.id) ? res.node : null;
+              } catch (err) {
+                core.info('node(id) lookup failed: ' + (err && err.message ? err.message : String(err)));
+                return null;
               }
-              const itemId = matched[0].id;
-              core.info(`Found project item id: ${itemId}`);
+            }
 
-              core.info('Querying project fields to find "Status" single-select option "In Progress"...');
-              const fieldsQuery = `
-                query ($projectId: ID!) {
-                  node(id: $projectId) {
-                    ... on ProjectV2 {
-                      fields(first:100) {
-                        nodes {
-                          id
+            // helper: try to find project via owner (user or org) + number
+            async function tryOwnerLookup(owner, number) {
+              try {
+                // First try user(...)
+                const qUser = `
+                  query ($owner: String!, $number: Int!) {
+                    user(login: $owner) {
+                      projectV2(number: $number) {
+                        id
+                        title
+                      }
+                    }
+                  }
+                `;
+                const ures = await octokit.graphql(qUser, { owner, number: parseInt(number,10) });
+                if (ures && ures.user && ures.user.projectV2 && ures.user.projectV2.id) return ures.user.projectV2;
+                // If not user, try organization
+                const qOrg = `
+                  query ($owner: String!, $number: Int!) {
+                    organization(login: $owner) {
+                      projectV2(number: $number) {
+                        id
+                        title
+                      }
+                    }
+                  }
+                `;
+                const ores = await octokit.graphql(qOrg, { owner, number: parseInt(number,10) });
+                if (ores && ores.organization && ores.organization.projectV2 && ores.organization.projectV2.id) return ores.organization.projectV2;
+                return null;
+              } catch (err) {
+                core.info('owner+number lookup failed: ' + (err && err.message ? err.message : String(err)));
+                return null;
+              }
+            }
+
+            // 1) resolve project node id (prefer secret PROJECT_V2_ID)
+            let resolvedProject = null;
+            if (providedProjectId) {
+              resolvedProject = await tryNodeLookup(providedProjectId);
+              if (!resolvedProject) {
+                core.info('PROJECT_V2_ID could not be resolved (token likely lacks access). Will try owner+number lookup next.');
+              } else {
+                core.info(`Resolved project via node: ${resolvedProject.title} (${resolvedProject.id})`);
+              }
+            }
+
+            // 2) fallback: try owner+number
+            if (!resolvedProject) {
+              core.info(`Trying to find project by owner=${projectOwner} number=${projectNumber}`);
+              const ownerProject = await tryOwnerLookup(projectOwner, projectNumber);
+              if (ownerProject) {
+                resolvedProject = ownerProject;
+                core.info(`Resolved project via owner+number: ${resolvedProject.title} (${resolvedProject.id})`);
+              } else {
+                core.error('Could not resolve ProjectV2 by node id or owner+number with the current token.');
+                core.error('Likely causes: PROJECT_V2_ID secret incorrect OR token used by the workflow lacks permission to access the user-level project.');
+                core.error('Fix: set PROJECT_PAT secret to a PAT from the project owner with project/repo scopes and re-run.');
+                throw new Error('ProjectV2 resolution failed. See logs for details.');
+              }
+            }
+
+            const projectId = resolvedProject.id;
+
+            // 3) list first items and avoid duplicates (first 50)
+            const listQuery = `
+              query ($projectId: ID!) {
+                node(id: $projectId) {
+                  ... on ProjectV2 {
+                    items(first: 50) {
+                      nodes {
+                        id
+                        content {
                           __typename
-                          ... on ProjectV2SingleSelectField {
-                            name
-                            options {
-                              id
-                              name
-                            }
-                          }
-                          ... on ProjectV2FieldCommon {
-                            name
-                          }
+                          ... on Issue { id }
+                          ... on PullRequest { id }
                         }
                       }
                     }
                   }
                 }
-              `;
-              const fieldsRes = await octokit.graphql(fieldsQuery, { projectId });
-              const fields = (((fieldsRes || {}).node || {}).fields || {}).nodes || [];
-
-              let statusField = fields.find(f => f.name === 'Status');
-              if (!statusField) {
-                core.info('No "Status" field found in project — cannot set In Progress.');
-                return;
               }
-
-              const options = statusField.options || [];
-              const inProgressOption = options.find(o => o.name === 'In Progress');
-              if (!inProgressOption) {
-                core.info('No "In Progress" option found for "Status" field — cannot update.');
-                return;
-              }
-              const fieldId = statusField.id;
-              const optionId = inProgressOption.id;
-
-              core.info(`Updating item ${itemId} field ${fieldId} => option ${optionId}`);
-              const updateMutation = `
-                mutation ($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: ID!) {
-                  updateProjectV2ItemFieldValue(input: {
-                    projectId: $projectId,
-                    itemId: $itemId,
-                    fieldId: $fieldId,
-                    value: { singleSelectOptionId: $optionId }
-                  }) {
-                    projectV2Item { id }
-                  }
-                }
-              `;
-              const updateRes = await octokit.graphql(updateMutation, { projectId, itemId, fieldId, optionId });
-              core.info('Update Status result: ' + JSON.stringify(updateRes));
-            } catch (err) {
-              core.error('Error setting status: ' + (err && err.message ? err.message : String(err)));
-              core.error('Full error: ' + JSON.stringify(err, Object.getOwnPropertyNames(err)));
-              throw err;
+            `;
+            const listRes = await octokit.graphql(listQuery, { projectId });
+            const nodes = (((listRes || {}).node || {}).items || {}).nodes || [];
+            core.info(`Checked ${nodes.length} items (first 50).`);
+            const already = nodes.some(n => n.content && n.content.id === contentNodeId);
+            if (already) {
+              core.info('Item already exists in project - skipping add.');
+              return;
             }
+
+            // 4) add item
+            const addMutation = `
+              mutation ($projectId: ID!, $contentId: ID!) {
+                addProjectV2ItemById(input: { projectId: $projectId, contentId: $contentId }) {
+                  item { id }
+                }
+              }
+            `;
+            const addRes = await octokit.graphql(addMutation, { projectId, contentId: contentNodeId });
+            core.info('Added item to project: ' + JSON.stringify(addRes));
