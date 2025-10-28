@@ -10,7 +10,7 @@ permissions:
 
 env:
   # Project ID ที่ถูกต้องสำหรับ Project V2 'DevOps-Issue'
-  PROJECT_ID: PVT_kwHOAhgQ884BGnV2 
+  PROJECT_ID: PVT_kwHOAhgQ884BGnf5
   
 jobs:
   # -----------------------------------------------
