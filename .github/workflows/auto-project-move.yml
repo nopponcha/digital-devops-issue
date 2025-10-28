@@ -1,189 +1,45 @@
-# Updated workflow: try node(id: PROJECT_V2_ID) first; if that fails, fallback to user(projectV2(number:...))
 name: Auto Move Project Card
 on:
   issues:
-    types: [labeled, assigned, opened]
-  pull_request:
-    types: [labeled, opened]
-
-permissions:
-  issues: write
-  pull-requests: write
-  contents: read
-
-env:
-  # set secrets PROJECT_V2_ID and optionally PROJECT_PAT
-  PROJECT_V2_ID: ${{ secrets.PROJECT_V2_ID }}
-  PROJECT_PAT: ${{ secrets.PROJECT_PAT }}
-  PROJECT_NUMBER: "2"          # project number from URL (users/nopponcha/projects/2)
-  PROJECT_OWNER: "nopponcha"   # owner login for the project
+    types: [labeled, assigned]
 
 jobs:
+  # -----------------------------------------------
+  # 1. TODO: เมื่อ n8n Flow 1 ติด Label 'Todo'
+  # -----------------------------------------------
   move_to_todo:
     if: github.event.action == 'labeled' && github.event.label.name == 'Todo'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    
     steps:
-      - name: Debug — runner info
-        run: |
-          echo "===== DEBUG START ====="
-          date
-          echo "GITHUB_EVENT_NAME: $GITHUB_EVENT_NAME"
-          echo "GITHUB_REF: $GITHUB_REF"
-          echo "PROJECT_V2_ID (masked): ${PROJECT_V2_ID:0:6}..."
-          echo "PROJECT_NUMBER: $PROJECT_NUMBER"
-          echo "PROJECT_OWNER: $PROJECT_OWNER"
-          echo "===== DEBUG END ====="
-
-      - name: Add labeled issue/PR to Project V2 (with fallback)
-        uses: actions/github-script@v6
+      - name: Set Status to Todo
+        # *** ใช้ Action สำเร็จรูปที่ออกแบบมาเพื่อ Project V2 field update โดยเฉพาะ ***
+        # Note: Actions ตัวนี้ไม่ใช่ของทางการ แต่ถูกออกแบบมาเพื่อแก้ปัญหานี้โดยตรง
+        uses: edgard/set-project-v2-field-action@v1 
         with:
-          github-token: ${{ secrets.PROJECT_PAT || secrets.GITHUB_TOKEN }}
-          script: |
-            core.info('Start add-to-project logic');
-            const label = context.payload.label && context.payload.label.name;
-            core.info(`Payload label: ${label}`);
-            if (label !== 'Todo') {
-              core.info('Label is not Todo — skipping.');
-              return;
-            }
+          # ใส่ Project ID ที่คุณหามาได้
+          project-id: PVT_kwHOAhgQ884BGiVe 
+          # ID ของ Item ที่จะอัพเดต (ได้มาจาก Payload ของ Issue Event)
+          issue-id: ${{ github.event.issue.node_id }} 
+          # ชื่อ Field ที่ต้องการอัพเดต (คือ Status)
+          field-name: Status 
+          # ค่าใหม่ที่ต้องการ (คือ Todo)
+          value: Todo
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
-            const contentNodeId = context.payload.issue ? context.payload.issue.node_id
-                                  : (context.payload.pull_request ? context.payload.pull_request.node_id : null);
-            if (!contentNodeId) throw new Error('No issue/PR node_id in payload.');
-
-            const providedProjectId = process.env.PROJECT_V2_ID;
-            const projectNumber = process.env.PROJECT_NUMBER || "2";
-            const projectOwner = process.env.PROJECT_OWNER || context.repo.owner;
-
-            if (!providedProjectId) {
-              core.warning('PROJECT_V2_ID secret not set — attempting to find project by owner+number (fallback).');
-            } else {
-              core.info(`Attempting node(id:${providedProjectId}) lookup.`);
-            }
-
-            const octokit = github;
-
-            // helper: try to resolve project node by global id
-            async function tryNodeLookup(projectId) {
-              try {
-                const q = `
-                  query ($projectId: ID!) {
-                    node(id: $projectId) {
-                      ... on ProjectV2 {
-                        id
-                        title
-                      }
-                    }
-                  }
-                `;
-                const res = await octokit.graphql(q, { projectId });
-                return (res && res.node && res.node.id) ? res.node : null;
-              } catch (err) {
-                core.info('node(id) lookup failed: ' + (err && err.message ? err.message : String(err)));
-                return null;
-              }
-            }
-
-            // helper: try to find project via owner (user or org) + number
-            async function tryOwnerLookup(owner, number) {
-              try {
-                // First try user(...)
-                const qUser = `
-                  query ($owner: String!, $number: Int!) {
-                    user(login: $owner) {
-                      projectV2(number: $number) {
-                        id
-                        title
-                      }
-                    }
-                  }
-                `;
-                const ures = await octokit.graphql(qUser, { owner, number: parseInt(number,10) });
-                if (ures && ures.user && ures.user.projectV2 && ures.user.projectV2.id) return ures.user.projectV2;
-                // If not user, try organization
-                const qOrg = `
-                  query ($owner: String!, $number: Int!) {
-                    organization(login: $owner) {
-                      projectV2(number: $number) {
-                        id
-                        title
-                      }
-                    }
-                  }
-                `;
-                const ores = await octokit.graphql(qOrg, { owner, number: parseInt(number,10) });
-                if (ores && ores.organization && ores.organization.projectV2 && ores.organization.projectV2.id) return ores.organization.projectV2;
-                return null;
-              } catch (err) {
-                core.info('owner+number lookup failed: ' + (err && err.message ? err.message : String(err)));
-                return null;
-              }
-            }
-
-            // 1) resolve project node id (prefer secret PROJECT_V2_ID)
-            let resolvedProject = null;
-            if (providedProjectId) {
-              resolvedProject = await tryNodeLookup(providedProjectId);
-              if (!resolvedProject) {
-                core.info('PROJECT_V2_ID could not be resolved (token likely lacks access). Will try owner+number lookup next.');
-              } else {
-                core.info(`Resolved project via node: ${resolvedProject.title} (${resolvedProject.id})`);
-              }
-            }
-
-            // 2) fallback: try owner+number
-            if (!resolvedProject) {
-              core.info(`Trying to find project by owner=${projectOwner} number=${projectNumber}`);
-              const ownerProject = await tryOwnerLookup(projectOwner, projectNumber);
-              if (ownerProject) {
-                resolvedProject = ownerProject;
-                core.info(`Resolved project via owner+number: ${resolvedProject.title} (${resolvedProject.id})`);
-              } else {
-                core.error('Could not resolve ProjectV2 by node id or owner+number with the current token.');
-                core.error('Likely causes: PROJECT_V2_ID secret incorrect OR token used by the workflow lacks permission to access the user-level project.');
-                core.error('Fix: set PROJECT_PAT secret to a PAT from the project owner with project/repo scopes and re-run.');
-                throw new Error('ProjectV2 resolution failed. See logs for details.');
-              }
-            }
-
-            const projectId = resolvedProject.id;
-
-            // 3) list first items and avoid duplicates (first 50)
-            const listQuery = `
-              query ($projectId: ID!) {
-                node(id: $projectId) {
-                  ... on ProjectV2 {
-                    items(first: 50) {
-                      nodes {
-                        id
-                        content {
-                          __typename
-                          ... on Issue { id }
-                          ... on PullRequest { id }
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            `;
-            const listRes = await octokit.graphql(listQuery, { projectId });
-            const nodes = (((listRes || {}).node || {}).items || {}).nodes || [];
-            core.info(`Checked ${nodes.length} items (first 50).`);
-            const already = nodes.some(n => n.content && n.content.id === contentNodeId);
-            if (already) {
-              core.info('Item already exists in project - skipping add.');
-              return;
-            }
-
-            // 4) add item
-            const addMutation = `
-              mutation ($projectId: ID!, $contentId: ID!) {
-                addProjectV2ItemById(input: { projectId: $projectId, contentId: $contentId }) {
-                  item { id }
-                }
-              }
-            `;
-            const addRes = await octokit.graphql(addMutation, { projectId, contentId: contentNodeId });
-            core.info('Added item to project: ' + JSON.stringify(addRes));
+  # -----------------------------------------------
+  # 2. IN PROGRESS: เมื่อ n8n Flow 2 Assign Engineer
+  # -----------------------------------------------
+  move_to_in_progress:
+    if: github.event.action == 'assigned'
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Set Status to In Progress
+        uses: edgard/set-project-v2-field-action@v1 
+        with:
+          project-id: PVT_kwHOAhgQ884BGiVe 
+          issue-id: ${{ github.event.issue.node_id }} 
+          field-name: Status 
+          value: In Progress
+          github-token: ${{ secrets.GITHUB_TOKEN }}
